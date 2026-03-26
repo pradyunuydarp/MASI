@@ -1,0 +1,7 @@
+{"user_id": "u_001", "item_id": "dress_001", "rating": 5.0, "timestamp": 1704067200}
+{"user_id": "u_001", "item_id": "dress_002", "rating": 4.0, "timestamp": 1704153600}
+{"user_id": "u_002", "item_id": "dress_001", "rating": 4.0, "timestamp": 1704240000}
+{"user_id": "u_002", "item_id": "shoe_001", "rating": 5.0, "timestamp": 1704326400}
+{"user_id": "u_003", "item_id": "dress_002", "rating": 5.0, "timestamp": 1704412800}
+{"user_id": "u_003", "item_id": "shoe_001", "rating": 4.0, "timestamp": 1704499200}
+{"user_id": "u_004", "item_id": "bag_001", "rating": 3.0, "timestamp": 1704585600}

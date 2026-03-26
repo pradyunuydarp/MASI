@@ -1,0 +1,22 @@
+{
+  "seed": 42,
+  "paths": {
+    "raw_root": "data/raw/amazon_reviews_2023",
+    "processed_root": "data/processed/demo",
+    "outputs_root": "outputs/demo",
+    "metadata_file": "data/raw/amazon_reviews_2023/demo_metadata.jsonl",
+    "reviews_file": "data/raw/amazon_reviews_2023/demo_reviews.jsonl"
+  },
+  "dataset": {
+    "name": "amazon_reviews_2023_clothing_shoes_jewelry",
+    "subset": "Clothing_Shoes_and_Jewelry",
+    "user_col": "user_id",
+    "item_col": "item_id",
+    "rating_col": "rating",
+    "timestamp_col": "timestamp",
+    "text_fields": ["title", "brand", "category"],
+    "image_fields": ["image_url"],
+    "min_user_interactions": 2,
+    "min_item_interactions": 2
+  }
+}

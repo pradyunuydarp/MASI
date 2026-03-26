@@ -1,0 +1,13 @@
+{
+  "seed": 7,
+  "history_max_tokens": 24,
+  "target_max_tokens": 8,
+  "mlm_max_tokens": 8,
+  "batch_size": 2,
+  "learning_rate": 0.001,
+  "hidden_dim": 64,
+  "num_heads": 4,
+  "num_layers": 2,
+  "dropout": 0.1,
+  "outputs_root": "outputs/recommender_demo"
+}

@@ -1,0 +1,25 @@
+{
+  "columns": {
+    "interactions": [
+      "item_id",
+      "rating",
+      "timestamp",
+      "user_id"
+    ],
+    "metadata": [
+      "brand",
+      "category",
+      "image_url",
+      "item_id",
+      "title"
+    ]
+  },
+  "dataset_name": "amazon_reviews_2023_clothing_shoes_jewelry",
+  "filtered_items": 3,
+  "filtered_users": 3,
+  "interaction_rows": 6,
+  "metadata_rows": 3,
+  "missing_image_rows": 0,
+  "missing_text_rows": 0,
+  "subset": "Clothing_Shoes_and_Jewelry"
+}

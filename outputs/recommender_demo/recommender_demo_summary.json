@@ -1,0 +1,22 @@
+{
+  "autoregressive_loss": 3.1931674480438232,
+  "mlm_loss": 3.4899063110351562,
+  "num_generative_examples": 6,
+  "num_mlm_examples": 8,
+  "sasrec_output_shape": [
+    3,
+    4,
+    64
+  ],
+  "seed": 7,
+  "special_tokens": [
+    "<PAD>",
+    "<BOS>",
+    "<EOS>",
+    "<MASK>",
+    "<SEP>",
+    "[TXT]",
+    "[VIS]"
+  ],
+  "vocab_size": 22
+}
