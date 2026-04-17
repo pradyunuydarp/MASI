@@ -29,6 +29,7 @@ This document translates the proposal into an implementation-oriented plan with 
 - `src/masi/alignment/`: Phase 1 behavior-aware contrastive alignment
 - `src/masi/tokenization/`: Phase 2 dual RQ-VAE modules
 - `src/masi/recommender/`: Phase 3 recommender-side pretraining and fine-tuning
+- `scripts/train_masi.py`: one-click launcher that resolves configs, storage, checkpoints, and stage execution
 
 ## Phase Mapping
 
@@ -45,7 +46,7 @@ Current implementation artifacts:
 Responsibilities:
 
 - validate raw metadata and interaction schemas,
-- apply iterative k-core filtering,
+- apply iterative user-item k-core filtering before any bounded subset selection,
 - standardize concatenated item text fields for future CLIP text encoding,
 - summarize missing text and image coverage before feature extraction.
 
@@ -57,12 +58,18 @@ Expected outputs:
 
 ### Phase 2: Behavior-Aware Contrastive Alignment
 
-Planned modules:
+Current implementation artifacts:
 
-- CLIP embedding extraction wrappers for text and images
-- user-item bipartite graph construction
-- mixed negative sampler with in-batch and hard graph negatives
-- trainable projection heads on top of frozen CLIP encoders
+- `src/masi/alignment/behavior_alignment.py`
+- `src/masi/tokenization/masi_tokens.py`
+- `scripts/build_masi_tokens.py`
+
+Implemented foundation:
+
+- frozen CLIP embedding extraction for text and images,
+- user-history-derived positive item pairs,
+- mixed negative sampling with in-batch negatives plus graph-hard negatives,
+- trainable text and vision projection heads for behavior-aware alignment.
 
 Expected outputs:
 
@@ -73,11 +80,18 @@ Expected outputs:
 
 ### Phase 3: Independent Modality Quantization
 
-Planned modules:
+Current implementation artifacts:
 
-- text RQ-VAE encoder/decoder and residual codebooks
-- vision RQ-VAE encoder/decoder and residual codebooks
-- late-fusion semantic ID builder with `[TXT]` and `[VIS]` markers
+- `src/masi/tokenization/rqvae.py`
+- `src/masi/tokenization/masi_tokens.py`
+- `outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl`
+- `outputs/amazon_csj_smoke_train/phase12_tokens/fused_semantic_ids.jsonl`
+
+Implemented foundation:
+
+- separate residual codebooks for text and image modalities,
+- independent quantization over aligned embeddings,
+- late fusion with `[TXT]` and `[VIS]` markers.
 
 Expected outputs:
 
@@ -91,37 +105,55 @@ Current implementation artifacts:
 
 - `src/masi/recommender/vocabulary.py`
 - `src/masi/recommender/sequence_data.py`
+- `src/masi/recommender/amazon_data.py`
 - `src/masi/recommender/sasrec.py`
 - `src/masi/recommender/generative.py`
 - `src/masi/recommender/mlm.py`
+- `src/masi/recommender/evaluation.py`
+- `src/masi/recommender/retrieval.py`
 - `src/masi/recommender/training.py`
 - `scripts/demo_recommender_foundation.py`
+- `scripts/run_masi_experiment.py`
+- `scripts/train_masi.py`
+- `scripts/download_amazon_csj_dataset.py`
 - `configs/recommender_demo.json`
+- `configs/recommender_amazon_csj_demo.json`
+- `configs/masi_experiment_amazon_csj_demo.json`
+- `configs/masi_train_csj_full.json`
+- `configs/masi_train_csj_smoke.json`
 
 Implemented foundation:
 
 - fused semantic-ID vocabulary with modality markers,
 - serialized user-history token datasets for generative recommendation,
 - item-level cross-modal MLM datasets for text-to-visual and visual-to-text reconstruction,
+- real Amazon review sequence import over `user_id`, `parent_asin`, and `timestamp`,
 - SASRec-style sequential baseline,
 - decoder-style semantic-ID generator for next-item token prediction.
+- deterministic leave-one-out warm-start and zero-shot cold-start splitting,
+- likelihood-based retrieval against the bounded item catalog,
+- proposal-aligned ranking metrics and ablation toggles,
+- automatic token-budget resolution for late-fused IDs,
+- checkpoint emission for the MLM and generative fine-tuning stages,
+- a one-click launcher that writes resolved configs and a run manifest.
 
 Remaining modules:
 
-- chronological fine-tuning on real user sequences,
-- decoding and retrieval against the full item catalog,
-- evaluation hooks for token-level reconstruction and ranking metrics.
+- broader baseline reproduction beyond the existing SASRec implementation,
+- larger-scale evaluation on a fuller Amazon subset,
+- experiment-sweep automation for the remaining ablation matrix.
 
 Expected outputs:
 
 - MLM checkpoints
 - sequential recommendation checkpoints
 - evaluation predictions and metrics
+- run manifests and resolved per-stage configs
 
 ## Assumptions
 
 - The repository will use a custom PyTorch recommender foundation first, then optionally add RecBole adapters where they simplify baseline comparison or evaluation.
-- The exact CLIP variant remains undecided and is tracked in `TODO_TASKS.md`.
+- `openai/clip-vit-base-patch32` is the current default CLIP variant for reproducible full-CSJ runs; larger variants remain future ablations.
 - Large raw datasets and checkpoints will remain outside git and be referenced by config paths.
 
 ## Known Deviations From The Proposal
@@ -131,3 +163,9 @@ One implementation choice now differs from the proposal's tentative mention of l
 - What changed: the initial recommender foundation is implemented as custom PyTorch modules in-repo rather than starting inside RecBole.
 - Why it changed: MASI needs explicit control over fused semantic-ID token serialization, cross-modal MLM masking, and decoder-style token generation, which are easier to prototype faithfully in a small local stack before library integration.
 - Relaxed assumption: RecBole is no longer assumed to be the primary first implementation surface; it is now treated as an optional integration path for baselines and evaluation.
+
+There is a second temporary deviation forced by local resource and ingestion constraints:
+
+- What changed: the smoke path can still fall back to review-side multimodal fields when the full metadata file is unavailable locally.
+- Why it changed: the local development workspace does not always keep the full metadata file alongside the bounded review prefix.
+- Relaxed assumption: the proposal-aligned full-CSJ launcher prefers the local metadata file, but the smoke path remains allowed to run on review-side text/image records so stage integration can still be regression-tested in low-storage environments.

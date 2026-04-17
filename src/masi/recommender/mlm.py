@@ -40,7 +40,13 @@ class CrossModalMLMPretrainer(nn.Module):
             batch_first=True,
             activation="gelu",
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        # Keep the MLM pretrainer on the same MPS-compatible execution path as
+        # the downstream generative model used in Phase 3.
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=num_layers,
+            enable_nested_tensor=False,
+        )
         self.output_norm = nn.LayerNorm(hidden_dim)
         self.output_projection = nn.Linear(hidden_dim, vocab_size)
 

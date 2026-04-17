@@ -1,5 +1,5 @@
-"""Phase 1 behavior-aware alignment modules.
+"""Phase 1 behavior-aware alignment modules."""
 
-Implemented modules will live here once CLIP feature extraction and graph-based
-contrastive training code is added.
-"""
+from masi.alignment.behavior_alignment import AlignmentResult, train_behavior_aware_alignment
+
+__all__ = ["AlignmentResult", "train_behavior_aware_alignment"]

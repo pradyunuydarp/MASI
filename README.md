@@ -52,6 +52,7 @@ These baselines define the evaluation bar for cold-start hit rate, coverage, and
 - [Multimodal_Augmented_Semantic_Identifiers_for_Cold_Start_Discovery_in_Generative_Recommendation__Research_Proposal.pdf](/Users/pradyundevarakonda/Developer/MASI/Multimodal_Augmented_Semantic_Identifiers_for_Cold_Start_Discovery_in_Generative_Recommendation__Research_Proposal.pdf): source proposal
 - [docs/technical_design.md](/Users/pradyundevarakonda/Developer/MASI/docs/technical_design.md): proposal-to-code translation with module boundaries and artifact contracts
 - [docs/reference_repos.md](/Users/pradyundevarakonda/Developer/MASI/docs/reference_repos.md): working map of foundational papers and public repositories relevant to MASI
+- [docs/masi_implementation_note.tex](/Users/pradyundevarakonda/Developer/MASI/docs/masi_implementation_note.tex): LaTeX implementation note covering completed work, rationale, and engineering challenges
 
 ## Current Repository Structure
 
@@ -63,6 +64,62 @@ These baselines define the evaluation bar for cold-start hit rate, coverage, and
 - `outputs/`: manifests, summaries, and future experiment results
 - `scripts/`: CLI entrypoints that wrap reusable library code
 - `src/masi/`: library modules for data, alignment, tokenization, and recommender stages
+
+## Hardware Assumptions
+
+- CLIP extraction and RQ-VAE training run on `cuda`, `mps`, or `cpu`, but the proposal-aligned full CSJ path is GPU-preferred.
+- The later-stage Phase 3 modules now use `cuda` when available, otherwise `mps`, otherwise `cpu`.
+- On Apple Silicon, the Phase 3 Transformer stack disables PyTorch's nested-tensor fast path so MLM pretraining and generative ranking can run on `mps` without falling back to CPU.
+- The one-click full CSJ launcher is intended for a GPU-backed Kaggle notebook, Colab session, or lab workstation with enough disk for raw reviews, metadata, image caches, checkpoints, and outputs.
+
+## One-Click CSJ Training
+
+The repository now has a single-entry training path for the proposal's primary benchmark setting: Amazon Reviews 2023 `Clothing_Shoes_and_Jewelry` with iterative `5-core` filtering.
+
+Main artifacts:
+
+- [scripts/train_masi.py](/Users/pradyundevarakonda/Developer/MASI/scripts/train_masi.py)
+- [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
+- [configs/masi_train_csj_smoke.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_smoke.json)
+
+What the launcher does:
+
+- resolves a storage root for local, Kaggle, or Colab runs,
+- downloads the CSJ reviews and metadata files when configured and missing,
+- enforces iterative user-item `5-core` filtering before subset selection,
+- prefers the local metadata file for text and image fields during full runs,
+- runs Phase 1 alignment, Phase 2 dual quantization, and Phase 3 experiment training in order,
+- writes resolved stage configs, checkpoints, summaries, and a top-level run manifest.
+
+Verified launcher artifact:
+
+- [outputs/amazon_csj_smoke_train/run_manifest.json](/Users/pradyundevarakonda/Developer/MASI/outputs/amazon_csj_smoke_train/run_manifest.json)
+
+## Full Amazon Requirements
+
+The repository is now ready for one-click full-CSJ training, which is the proposal's primary dataset target. Running MASI on the entire Amazon Reviews 2023 corpus is a separate engineering tier and still requires additional infrastructure.
+
+Minimum practical requirements:
+
+- sharded storage outside git for raw reviews, metadata, image caches, embeddings, checkpoints, and run artifacts,
+- resumable preprocessing and training stages with manifest-based progress tracking,
+- deterministic split generation and seed handling across shards,
+- batched or indexed retrieval for evaluation instead of the current exhaustive per-item scoring path,
+- a GPU-preferred training environment with enough disk budget for cached multimodal features.
+
+Expected full-corpus work areas:
+
+- sharded ingestion for review and metadata tables,
+- large-scale image validation and caching,
+- cached CLIP text and image feature extraction,
+- checkpointed Phase 1 projection-head training,
+- checkpointed Phase 2 dual quantization,
+- optimized Phase 3 evaluation over a large candidate catalog,
+- baseline reproduction and ablation sweeps on the same splits.
+
+Current limitation:
+
+- the repository is not yet ready for an end-to-end full Amazon Reviews 2023 run without additional scaling work in storage layout, preprocessing, and evaluation.
 
 ## Implemented First Slice
 
@@ -103,9 +160,91 @@ Verified demo artifact:
 
 - [outputs/recommender_demo/recommender_demo_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/recommender_demo/recommender_demo_summary.json)
 
+## Phase 1 + Phase 2 MASI Tokens
+
+The repository now has an actual bounded implementation of the proposal's first two modeling stages:
+
+1. frozen CLIP text and vision encoders,
+2. behavior-aware contrastive alignment with separate text and image projection heads,
+3. independent modality quantization with separate residual codebooks,
+4. late fusion into `[TXT] <text codes> [VIS] <vision codes>`.
+
+Main artifacts:
+
+- [src/masi/alignment/behavior_alignment.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/alignment/behavior_alignment.py)
+- [src/masi/tokenization/rqvae.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/rqvae.py)
+- [src/masi/tokenization/masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/masi_tokens.py)
+- [scripts/build_masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/scripts/build_masi_tokens.py)
+- [configs/masi_tokens_amazon_csj_demo.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_tokens_amazon_csj_demo.json)
+
+Current token artifact:
+
+- [outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl)
+- [outputs/masi_tokens_amazon_csj_demo/masi_token_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/masi_token_summary.json)
+
+## Imported Amazon Data
+
+The recommender demo no longer uses hardcoded interaction histories. It now reads the official Amazon Reviews 2023 `Clothing_Shoes_and_Jewelry` review schema from:
+
+- `user_id`
+- `parent_asin`
+- `timestamp`
+- review-side `title`, `text`, and `images`
+
+Current local constraint:
+
+- the raw review file served by the official endpoint is about `25.9 GiB`
+- this machine does not have enough free space to store the full raw review dump end to end
+- the repo therefore uses a bounded imported prefix of the official review file for local development
+
+Current real-data demo artifact:
+
+- [outputs/recommender_amazon_csj_demo/recommender_demo_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/recommender_amazon_csj_demo/recommender_demo_summary.json)
+
+Current modeling limitation:
+
+- the full one-click launcher now prefers the local CSJ metadata file and uses review-side multimodal records only as a bounded fallback
+- the current local smoke artifact still runs on a truncated review file, so its token coverage is intentionally much lower than a real full-CSJ run
+- the recommender now prefers the generated MASI fused-ID artifact when it exists and only falls back to proxy tokens if that artifact is missing
+
+## Later-Stage Experiment Runner
+
+The repository now includes a bounded but complete later-stage experiment path for the proposal:
+
+1. deterministic warm-start and zero-shot cold-start leave-one-out splitting,
+2. optional cross-modal MLM pretraining on the same Transformer backbone,
+3. chronological fine-tuning on user histories,
+4. token-sequence retrieval against the bounded item catalog,
+5. `HR@10`, `NDCG@10`, `Coverage@10`, and latency reporting.
+
+Main artifacts:
+
+- [src/masi/common/toggles.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/common/toggles.py)
+- [src/masi/recommender/evaluation.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/evaluation.py)
+- [src/masi/recommender/retrieval.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/retrieval.py)
+- [scripts/run_masi_experiment.py](/Users/pradyundevarakonda/Developer/MASI/scripts/run_masi_experiment.py)
+- [scripts/train_masi.py](/Users/pradyundevarakonda/Developer/MASI/scripts/train_masi.py)
+- [configs/masi_experiment_amazon_csj_demo.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_experiment_amazon_csj_demo.json)
+- [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
+
+Verified experiment artifact:
+
+- [outputs/masi_experiment_amazon_csj_demo/experiment_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_experiment_amazon_csj_demo/experiment_summary.json)
+- [outputs/amazon_csj_smoke_train/phase3_experiment/experiment_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/amazon_csj_smoke_train/phase3_experiment/experiment_summary.json)
+
+The experiment config exposes proposal-aligned booleans so ablations can switch methods on or off without editing code:
+
+- `use_behavior_alignment`
+- `use_text_modality`
+- `use_visual_modality`
+- `use_late_fusion`
+- `use_cross_modal_mlm`
+- `use_generative_finetuning`
+- `use_cold_start_evaluation`
+
 ## Setup
 
-The current preprocessing slice is standard-library only. No third-party Python packages are required for the verified CLI workflow.
+The minimal preprocessing-only demo path is still standard-library only.
 
 Optional package install for future work:
 
@@ -113,13 +252,15 @@ Optional package install for future work:
 python3 -m pip install -e .
 ```
 
-For recommender development, create the local virtual environment used for the verified demo:
+For the full MASI training path, create the local virtual environment used for the verified smoke run:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -e ".[recommender]"
 ```
+
+The `recommender` extra now includes the packages required by the one-click launcher and the Phase 1/2 token builder, including `torch`, `transformers`, and `Pillow`.
 
 If you want to open the notebooks locally, install Jupyter inside that environment:
 
@@ -128,6 +269,26 @@ If you want to open the notebooks locally, install Jupyter inside that environme
 ```
 
 ## Usage
+
+Run the proposal-aligned smoke pipeline end to end:
+
+```bash
+make train-smoke
+```
+
+Run the full one-click CSJ training path:
+
+```bash
+make train-full
+```
+
+Run the same full path with an explicit storage root, which is useful for Kaggle, Colab, or an attached lab disk:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/train_masi.py \
+  --config configs/masi_train_csj_full.json \
+  --storage-root /path/to/masi_storage
+```
 
 Run the synthetic preprocessing demo:
 
@@ -144,13 +305,49 @@ PYTHONPATH=src python3 scripts/build_dataset_manifest.py --config configs/data_p
 Run the recommender foundation demo:
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/demo_recommender_foundation.py --config configs/recommender_demo.json
+PYTHONPATH=src .venv/bin/python scripts/demo_recommender_foundation.py --config configs/recommender_amazon_csj_demo.json
+```
+
+Download a bounded prefix of the official Amazon CSJ reviews file for local development:
+
+```bash
+PYTHONPATH=src python3 scripts/download_amazon_csj_dataset.py
+```
+
+Download the full CSJ reviews file and metadata file:
+
+```bash
+PYTHONPATH=src python3 scripts/download_amazon_csj_dataset.py --full-reviews --download-metadata
+```
+
+Build Phase 1 + Phase 2 MASI fused tokens:
+
+```bash
+make masi-tokens
 ```
 
 Open the demo notebook:
 
 - [notebooks/01_dataset_and_feature_prep_demo.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/01_dataset_and_feature_prep_demo.ipynb)
 - [notebooks/02_recommender_foundation_demo.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/02_recommender_foundation_demo.ipynb)
+- [notebooks/03_colab_smoke_test.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/03_colab_smoke_test.ipynb)
+
+Run the later-stage bounded experiment:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/run_masi_experiment.py --config configs/masi_experiment_amazon_csj_demo.json
+```
+
+## Full-Corpus Next Steps
+
+Before attempting the entire Amazon Reviews 2023 dataset, the recommended order is:
+
+1. define storage, checkpoint, and shard contracts,
+2. add sharded review and metadata ingestion,
+3. cache CLIP embeddings and image assets,
+4. add scalable retrieval/evaluation,
+5. run full Phase 1 -> Phase 3 training,
+6. run baselines and ablations on the same full-scale splits.
 
 ## Initial Execution Plan
 

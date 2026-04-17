@@ -1,8 +1,8 @@
 {
   "seed": 7,
   "history_max_tokens": 24,
-  "target_max_tokens": 8,
-  "mlm_max_tokens": 8,
+  "target_max_tokens": null,
+  "mlm_max_tokens": null,
   "batch_size": 2,
   "learning_rate": 0.001,
   "hidden_dim": 64,

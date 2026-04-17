@@ -29,6 +29,18 @@ class LoadedConfig:
     data: dict[str, Any]
 
 
+def find_repo_root(start_path: str | Path) -> Path:
+    """Resolve the nearest ancestor containing the repository marker."""
+
+    candidate = Path(start_path).expanduser().resolve()
+    if candidate.is_file():
+        candidate = candidate.parent
+    for parent in (candidate, *candidate.parents):
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return candidate
+
+
 def load_json_config(config_path: str | Path) -> LoadedConfig:
     """Load a JSON config file and return an absolute-path aware wrapper.
 

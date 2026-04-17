@@ -1,0 +1,75 @@
+{
+  "seed": 7,
+  "runtime": {
+    "run_name": "amazon_csj_smoke_train",
+    "resume_if_artifacts_exist": true,
+    "download_reviews_if_missing": false,
+    "download_metadata_if_missing": false,
+    "full_reviews": false
+  },
+  "dataset": {
+    "reviews_path": "data/raw/amazon_reviews_2023/Clothing_Shoes_and_Jewelry.jsonl",
+    "metadata_path": "data/raw/amazon_reviews_2023/meta_Clothing_Shoes_and_Jewelry.jsonl",
+    "min_user_interactions": 5,
+    "min_item_interactions": 5,
+    "max_users": 64,
+    "max_items": 128,
+    "max_review_records": 50000,
+    "collapse_consecutive_duplicates": false
+  },
+  "assets": {
+    "image_cache_dir": "data/processed/amazon_csj_smoke/images",
+    "metadata_cache_path": "data/processed/amazon_csj_smoke/metadata.slice.jsonl",
+    "use_remote_metadata": false
+  },
+  "clip": {
+    "model_name": "openai/clip-vit-base-patch32",
+    "batch_size": 8
+  },
+  "alignment": {
+    "projection_dim": 128,
+    "epochs": 2,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "temperature": 0.07,
+    "hard_negative_count": 4,
+    "window_size": 2,
+    "dropout": 0.1
+  },
+  "tokenization": {
+    "latent_dim": 128,
+    "depth": 3,
+    "codebook_size": 64,
+    "epochs": 8,
+    "batch_size": 64,
+    "learning_rate": 0.002,
+    "commitment_weight": 0.25,
+    "refit_codebooks_with_residual_kmeans": true
+  },
+  "experiment": {
+    "history_max_tokens": 64,
+    "target_max_tokens": null,
+    "mlm_max_tokens": null,
+    "batch_size": 8,
+    "learning_rate": 0.001,
+    "hidden_dim": 64,
+    "num_heads": 4,
+    "num_layers": 2,
+    "dropout": 0.1,
+    "mlm_epochs": 2,
+    "autoregressive_epochs": 3,
+    "top_k": 10,
+    "cold_start_ratio": 0.25,
+    "min_train_history": 1,
+    "min_sequence_items": 2
+  },
+  "method_toggles": {
+    "use_behavior_alignment": true,
+    "use_text_modality": true,
+    "use_visual_modality": true,
+    "use_late_fusion": true,
+    "use_cross_modal_mlm": true,
+    "use_generative_finetuning": true,
+    "use_cold_start_evaluation": true
+  }
+}

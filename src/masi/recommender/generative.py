@@ -41,7 +41,13 @@ class GenerativeSIDRecommender(nn.Module):
             batch_first=True,
             activation="gelu",
         )
-        self.decoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        # MPS does not currently support the nested-tensor fast path used by
+        # the default TransformerEncoder configuration during masked ranking.
+        self.decoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=num_layers,
+            enable_nested_tensor=False,
+        )
         self.output_norm = nn.LayerNorm(hidden_dim)
         self.output_projection = nn.Linear(hidden_dim, vocab_size)
 

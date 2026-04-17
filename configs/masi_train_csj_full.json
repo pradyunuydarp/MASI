@@ -1,0 +1,75 @@
+{
+  "seed": 7,
+  "runtime": {
+    "run_name": "amazon_csj_full_train",
+    "resume_if_artifacts_exist": true,
+    "download_reviews_if_missing": true,
+    "download_metadata_if_missing": true,
+    "full_reviews": true
+  },
+  "dataset": {
+    "reviews_path": "data/raw/amazon_reviews_2023/Clothing_Shoes_and_Jewelry.jsonl",
+    "metadata_path": "data/raw/amazon_reviews_2023/meta_Clothing_Shoes_and_Jewelry.jsonl",
+    "min_user_interactions": 5,
+    "min_item_interactions": 5,
+    "max_users": null,
+    "max_items": null,
+    "max_review_records": null,
+    "collapse_consecutive_duplicates": false
+  },
+  "assets": {
+    "image_cache_dir": "data/processed/amazon_csj_full/images",
+    "metadata_cache_path": "data/processed/amazon_csj_full/metadata.slice.jsonl",
+    "use_remote_metadata": false
+  },
+  "clip": {
+    "model_name": "openai/clip-vit-base-patch32",
+    "batch_size": 32
+  },
+  "alignment": {
+    "projection_dim": 256,
+    "epochs": 4,
+    "batch_size": 256,
+    "learning_rate": 0.001,
+    "temperature": 0.07,
+    "hard_negative_count": 16,
+    "window_size": 2,
+    "dropout": 0.1
+  },
+  "tokenization": {
+    "latent_dim": 256,
+    "depth": 3,
+    "codebook_size": 256,
+    "epochs": 20,
+    "batch_size": 256,
+    "learning_rate": 0.0002,
+    "commitment_weight": 0.25,
+    "refit_codebooks_with_residual_kmeans": false
+  },
+  "experiment": {
+    "history_max_tokens": 256,
+    "target_max_tokens": null,
+    "mlm_max_tokens": null,
+    "batch_size": 64,
+    "learning_rate": 0.0005,
+    "hidden_dim": 256,
+    "num_heads": 8,
+    "num_layers": 4,
+    "dropout": 0.1,
+    "mlm_epochs": 5,
+    "autoregressive_epochs": 10,
+    "top_k": 10,
+    "cold_start_ratio": 0.2,
+    "min_train_history": 1,
+    "min_sequence_items": 2
+  },
+  "method_toggles": {
+    "use_behavior_alignment": true,
+    "use_text_modality": true,
+    "use_visual_modality": true,
+    "use_late_fusion": true,
+    "use_cross_modal_mlm": true,
+    "use_generative_finetuning": true,
+    "use_cold_start_evaluation": true
+  }
+}

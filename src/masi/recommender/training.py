@@ -7,8 +7,11 @@ graduates to a fuller experiment runner.
 
 from __future__ import annotations
 
+from statistics import mean
+
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 
 from masi.recommender.mlm import masked_language_modeling_loss
 
@@ -54,3 +57,70 @@ def training_step(
     loss.backward()
     optimizer.step()
     return float(loss.detach().cpu().item())
+
+
+def run_training_epochs(
+    *,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    data_loader: DataLoader,
+    objective: str,
+    pad_token_id: int,
+    input_key: str,
+    label_key: str,
+    epochs: int,
+    device: torch.device,
+) -> list[float]:
+    """Train a model for multiple epochs and return mean epoch losses."""
+
+    epoch_losses: list[float] = []
+    model.to(device)
+    for _ in range(epochs):
+        batch_losses: list[float] = []
+        for batch in data_loader:
+            batch_inputs = batch[input_key].to(device)
+            batch_labels = batch[label_key].to(device)
+            batch_losses.append(
+                training_step(
+                    model=model,
+                    optimizer=optimizer,
+                    batch_inputs=batch_inputs,
+                    batch_labels=batch_labels,
+                    objective=objective,
+                    pad_token_id=pad_token_id,
+                )
+            )
+        epoch_losses.append(mean(batch_losses) if batch_losses else 0.0)
+    return epoch_losses
+
+
+def initialize_generative_from_mlm(
+    *,
+    generative_model: nn.Module,
+    mlm_model: nn.Module,
+    use_cross_modal_mlm: bool = True,
+) -> None:
+    """Copy shared weights from MLM pretraining into the generative model."""
+
+    if not use_cross_modal_mlm:
+        return
+
+    generative_model.token_embedding.load_state_dict(mlm_model.token_embedding.state_dict())
+    generative_model.output_norm.load_state_dict(mlm_model.output_norm.state_dict())
+    generative_model.output_projection.load_state_dict(mlm_model.output_projection.state_dict())
+
+    with torch.no_grad():
+        source_positions = mlm_model.position_embedding.weight.data
+        target_positions = generative_model.position_embedding.weight.data
+        copy_length = min(source_positions.size(0), target_positions.size(0))
+        target_positions[:copy_length].copy_(source_positions[:copy_length])
+
+    mlm_state = mlm_model.encoder.state_dict()
+    decoder_state = generative_model.decoder.state_dict()
+    transferable = {
+        key: value
+        for key, value in mlm_state.items()
+        if key in decoder_state and decoder_state[key].shape == value.shape
+    }
+    decoder_state.update(transferable)
+    generative_model.decoder.load_state_dict(decoder_state)

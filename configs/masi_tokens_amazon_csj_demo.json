@@ -1,0 +1,44 @@
+{
+  "seed": 7,
+  "dataset": {
+    "reviews_path": "data/raw/amazon_reviews_2023/Clothing_Shoes_and_Jewelry.jsonl",
+    "min_user_interactions": 5,
+    "min_item_interactions": 5,
+    "max_users": 96,
+    "max_items": 128,
+    "max_review_records": 250000,
+    "collapse_consecutive_duplicates": false
+  },
+  "assets": {
+    "metadata_local_path": "data/raw/amazon_reviews_2023/meta_Clothing_Shoes_and_Jewelry.jsonl",
+    "use_remote_metadata": false,
+    "metadata_cache_path": "data/processed/amazon_csj_demo/metadata.slice.jsonl",
+    "image_cache_dir": "data/processed/amazon_csj_demo/images"
+  },
+  "clip": {
+    "model_name": "openai/clip-vit-base-patch32",
+    "batch_size": 8
+  },
+  "alignment": {
+    "projection_dim": 128,
+    "epochs": 2,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "temperature": 0.07,
+    "hard_negative_count": 4,
+    "window_size": 2,
+    "dropout": 0.1
+  },
+  "tokenization": {
+    "latent_dim": 128,
+    "depth": 3,
+    "codebook_size": 64,
+    "epochs": 8,
+    "batch_size": 32,
+    "learning_rate": 0.002,
+    "commitment_weight": 0.25,
+    "refit_codebooks_with_residual_kmeans": true
+  },
+  "outputs_root": "outputs/masi_tokens_amazon_csj_demo",
+  "fused_ids_path": "outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl"
+}

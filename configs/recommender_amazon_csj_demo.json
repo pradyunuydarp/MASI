@@ -1,0 +1,23 @@
+{
+  "seed": 7,
+  "history_max_tokens": 24,
+  "target_max_tokens": null,
+  "mlm_max_tokens": null,
+  "batch_size": 2,
+  "learning_rate": 0.001,
+  "hidden_dim": 64,
+  "num_heads": 4,
+  "num_layers": 2,
+  "dropout": 0.1,
+  "outputs_root": "outputs/recommender_amazon_csj_demo",
+  "token_artifact_path": "outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl",
+  "dataset": {
+    "reviews_path": "data/raw/amazon_reviews_2023/Clothing_Shoes_and_Jewelry.jsonl",
+    "min_user_interactions": 5,
+    "min_item_interactions": 5,
+    "max_users": 256,
+    "max_items": 512,
+    "max_review_records": 400000,
+    "collapse_consecutive_duplicates": false
+  }
+}

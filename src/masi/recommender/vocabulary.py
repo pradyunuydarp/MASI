@@ -35,10 +35,25 @@ class FusedSemanticId:
     text_codes: list[str]
     visual_codes: list[str]
 
-    def to_tokens(self) -> list[str]:
-        """Render the fused semantic ID into the proposal's token order."""
+    def to_tokens(
+        self,
+        *,
+        use_text_modality: bool = True,
+        use_visual_modality: bool = True,
+        use_late_fusion: bool = True,
+    ) -> list[str]:
+        """Render the semantic ID into the requested ablation form."""
 
-        return ["[TXT]", *self.text_codes, "[VIS]", *self.visual_codes]
+        tokens: list[str] = []
+        if use_text_modality:
+            if use_late_fusion:
+                tokens.append("[TXT]")
+            tokens.extend(self.text_codes)
+        if use_visual_modality:
+            if use_late_fusion:
+                tokens.append("[VIS]")
+            tokens.extend(self.visual_codes)
+        return tokens or ["[TXT]", "txt_null"]
 
 
 @dataclass(slots=True)
@@ -55,7 +70,14 @@ class TokenVocabulary:
     id_to_token: dict[int, str] = field(default_factory=dict)
 
     @classmethod
-    def build(cls, fused_ids: list[FusedSemanticId]) -> "TokenVocabulary":
+    def build(
+        cls,
+        fused_ids: list[FusedSemanticId],
+        *,
+        use_text_modality: bool = True,
+        use_visual_modality: bool = True,
+        use_late_fusion: bool = True,
+    ) -> "TokenVocabulary":
         """Construct a vocabulary from known fused semantic IDs."""
 
         token_to_id: dict[str, int] = {}
@@ -67,7 +89,11 @@ class TokenVocabulary:
             id_to_token[index] = token
 
         for fused_id in fused_ids:
-            for token in fused_id.to_tokens():
+            for token in fused_id.to_tokens(
+                use_text_modality=use_text_modality,
+                use_visual_modality=use_visual_modality,
+                use_late_fusion=use_late_fusion,
+            ):
                 if token not in token_to_id:
                     index = len(token_to_id)
                     token_to_id[token] = index

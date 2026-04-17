@@ -55,6 +55,60 @@ def _pad_sequence(sequence: list[int], *, max_length: int, pad_id: int) -> list[
     return sequence + [pad_id] * (max_length - len(sequence))
 
 
+def serialize_history_tokens(
+    *,
+    history_item_ids: list[str],
+    item_tokens: dict[str, list[int]],
+    vocabulary: TokenVocabulary,
+) -> list[int]:
+    """Serialize a chronological item history into one flat token stream."""
+
+    flattened_history: list[int] = [vocabulary.bos_id]
+    for item_id in history_item_ids:
+        if item_id not in item_tokens:
+            continue
+        flattened_history.extend(item_tokens[item_id])
+        flattened_history.append(vocabulary.sep_id)
+    return flattened_history
+
+
+def serialize_target_tokens(
+    *,
+    target_item_id: str,
+    item_tokens: dict[str, list[int]],
+    vocabulary: TokenVocabulary,
+) -> list[int]:
+    """Serialize the next-item target sequence."""
+
+    return [
+        *item_tokens[target_item_id],
+        vocabulary.eos_id,
+    ]
+
+
+def resolve_token_budgets(
+    *,
+    item_tokens: dict[str, list[int]],
+    configured_target_max_tokens: int | None,
+    configured_mlm_max_tokens: int | None,
+) -> tuple[int, int]:
+    """Resolve safe per-item token budgets for autoregressive and MLM stages."""
+
+    max_item_token_length = max((len(tokens) for tokens in item_tokens.values()), default=0)
+    required_target_max_tokens = max_item_token_length + 1  # item tokens + <EOS>
+    required_mlm_max_tokens = max_item_token_length + 2  # <BOS> + item tokens + <EOS>
+
+    target_max_tokens = max(
+        required_target_max_tokens,
+        0 if configured_target_max_tokens is None else int(configured_target_max_tokens),
+    )
+    mlm_max_tokens = max(
+        required_mlm_max_tokens,
+        0 if configured_mlm_max_tokens is None else int(configured_mlm_max_tokens),
+    )
+    return target_max_tokens, mlm_max_tokens
+
+
 class GenerativeSequenceDataset(Dataset[GenerativeTrainingExample]):
     """Flatten user histories into token-level autoregressive examples.
 
@@ -86,16 +140,18 @@ class GenerativeSequenceDataset(Dataset[GenerativeTrainingExample]):
                 history_items = item_sequence[:prediction_index]
                 target_item = item_sequence[prediction_index]
 
-                flattened_history: list[int] = [vocabulary.bos_id]
-                for item_id in history_items:
-                    flattened_history.extend(item_tokens[item_id])
-                    flattened_history.append(vocabulary.sep_id)
-
-                target_tokens = [
-                    vocabulary.bos_id,
-                    *item_tokens[target_item],
-                    vocabulary.eos_id,
-                ]
+                if target_item not in item_tokens:
+                    continue
+                flattened_history = serialize_history_tokens(
+                    history_item_ids=history_items,
+                    item_tokens=item_tokens,
+                    vocabulary=vocabulary,
+                )
+                target_tokens = serialize_target_tokens(
+                    target_item_id=target_item,
+                    item_tokens=item_tokens,
+                    vocabulary=vocabulary,
+                )
 
                 self.examples.append(
                     GenerativeTrainingExample(
@@ -156,17 +212,29 @@ class CrossModalMLMDataset(Dataset[CrossModalMLMExample]):
         fused_ids: list[FusedSemanticId],
         vocabulary: TokenVocabulary,
         max_length: int = 16,
+        use_text_modality: bool = True,
+        use_visual_modality: bool = True,
+        use_late_fusion: bool = True,
     ) -> None:
         self.examples: list[CrossModalMLMExample] = []
         self.vocabulary = vocabulary
         self.max_length = max_length
 
         for fused_id in fused_ids:
-            tokens = fused_id.to_tokens()
+            tokens = fused_id.to_tokens(
+                use_text_modality=use_text_modality,
+                use_visual_modality=use_visual_modality,
+                use_late_fusion=use_late_fusion,
+            )
+            if not use_text_modality or not use_visual_modality:
+                # Cross-modal MLM is only meaningful when both modalities are
+                # present in the active token stream.
+                continue
             token_ids = vocabulary.encode(tokens)
 
-            txt_boundary = 1 + len(fused_id.text_codes)
-            vis_boundary = txt_boundary + 1
+            text_start = 1 if use_late_fusion else 0
+            text_end = text_start + len(fused_id.text_codes)
+            visual_start = text_end + (1 if use_late_fusion else 0)
 
             text_to_visual = list(token_ids)
             visual_to_text = list(token_ids)
@@ -175,11 +243,11 @@ class CrossModalMLMDataset(Dataset[CrossModalMLMExample]):
 
             # Keep the modality markers intact so the model always knows the
             # structural role of the masked span.
-            for position in range(vis_boundary, len(token_ids)):
+            for position in range(visual_start, len(token_ids)):
                 text_to_visual[position] = vocabulary.mask_id
                 text_to_visual_labels[position] = token_ids[position]
 
-            for position in range(1, txt_boundary):
+            for position in range(text_start, text_end):
                 visual_to_text[position] = vocabulary.mask_id
                 visual_to_text_labels[position] = token_ids[position]
 

@@ -17,7 +17,9 @@ dependencies = []
 [project.optional-dependencies]
 recommender = [
   "numpy>=2.4.3",
-  "torch>=2.10.0"
+  "Pillow>=10.0.0",
+  "torch>=2.10.0",
+  "transformers>=4.45.0"
 ]
 
 [tool.setuptools]
