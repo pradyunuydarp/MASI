@@ -1,0 +1,178 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{longtable}
+
+\title{MASI Implementation Note:\\
+Behavior-Aware Alignment, Independent Quantization, and Recommender Integration}
+\author{Repository Engineering Log}
+\date{March 26, 2026}
+
+\begin{document}
+\maketitle
+
+\section{Purpose}
+This document records the implementation work completed to move the MASI repository from a recommender demo based on placeholder fused tokens to a bounded but proposal-faithful pipeline implementing the first three stages of the proposed method:
+\begin{enumerate}[leftmargin=1.5em]
+    \item Behavior-Aware Contrastive Alignment
+    \item Independent Modality Quantization (Late Fusion)
+    \item Recommender-Side Cross-Modal Alignment
+\end{enumerate}
+
+The goal of this note is to make the repository handoff-ready by stating:
+\begin{itemize}[leftmargin=1.5em]
+    \item what was built,
+    \item why each change was made,
+    \item what technical constraints shaped the implementation,
+    \item what remains incomplete relative to the original proposal.
+\end{itemize}
+
+\section{Completed Work}
+\subsection{Phase 1: Behavior-Aware Contrastive Alignment}
+The repository now contains a working Phase 1 alignment module in
+\href{/Users/pradyundevarakonda/Developer/MASI/src/masi/alignment/behavior_alignment.py}{\texttt{src/masi/alignment/behavior\_alignment.py}}.
+
+The implemented steps are:
+\begin{itemize}[leftmargin=1.5em]
+    \item frozen CLIP text and image embeddings are extracted for a bounded Amazon CSJ item subset,
+    \item collaborative positive item pairs are built from chronological user histories,
+    \item hard negatives are sampled from graph-aware non-neighbor items,
+    \item separate trainable projection heads are optimized for text and image modalities,
+    \item independent InfoNCE losses are summed to produce the behavior-aware alignment objective.
+\end{itemize}
+
+This directly follows the proposal's design choice to preserve modality-specific learning while injecting collaborative behavioral structure before tokenization.
+
+\subsection{Phase 2: Independent Modality Quantization and Late Fusion}
+The repository now contains a bounded independent quantization path in
+\href{/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/rqvae.py}{\texttt{src/masi/tokenization/rqvae.py}} and
+\href{/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/masi_tokens.py}{\texttt{src/masi/tokenization/masi\_tokens.py}}.
+
+The implemented steps are:
+\begin{itemize}[leftmargin=1.5em]
+    \item aligned text embeddings are quantized with a text-only residual codebook stack,
+    \item aligned image embeddings are quantized with an image-only residual codebook stack,
+    \item the two code sequences are combined using explicit late fusion markers \texttt{[TXT]} and \texttt{[VIS]},
+    \item fused semantic IDs are persisted as a JSONL artifact for the recommender stage.
+\end{itemize}
+
+The primary output is:
+\begin{itemize}[leftmargin=1.5em]
+    \item \href{/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl}{\texttt{outputs/masi\_tokens\_amazon\_csj\_demo/fused\_semantic\_ids.jsonl}}
+\end{itemize}
+
+\subsection{Phase 3: Recommender-Side Cross-Modal Alignment}
+The recommender code now consumes the generated Phase 1/2 fused-ID artifact instead of the earlier review-field proxy tokens when that artifact is present.
+
+This behavior is implemented in
+\href{/Users/pradyundevarakonda/Developer/MASI/scripts/demo_recommender_foundation.py}{\texttt{scripts/demo\_recommender\_foundation.py}}
+and configured through
+\href{/Users/pradyundevarakonda/Developer/MASI/configs/recommender_amazon_csj_demo.json}{\texttt{configs/recommender\_amazon\_csj\_demo.json}}.
+
+The recommender-side code now supports:
+\begin{itemize}[leftmargin=1.5em]
+    \item token-sequence recommendation histories built from real Amazon user interactions,
+    \item cross-modal masked token reconstruction,
+    \item autoregressive next-item token prediction,
+    \item fallback to proxy tokens only when the Phase 1/2 artifact is absent.
+\end{itemize}
+
+\section{Why These Changes Were Made}
+\subsection{Why replace placeholder fused tokens}
+The placeholder token path was useful for bootstrapping the recommender modules, but it was not faithful to the proposal's central research claim. MASI's novelty depends on:
+\begin{itemize}[leftmargin=1.5em]
+    \item alignment before quantization,
+    \item independent modality codebooks,
+    \item late-fused token sequences.
+\end{itemize}
+
+Without replacing the placeholder tokens, the recommender was not exercising the actual MASI indexing strategy.
+
+\subsection{Why the implementation is bounded}
+The implementation intentionally works on a bounded item and user subset. This was not a modeling preference; it was a systems decision driven by local resource constraints. The official raw review file is too large for the remaining free disk in this workspace, so the code had to:
+\begin{itemize}[leftmargin=1.5em]
+    \item stream or partially cache Amazon data,
+    \item use a bounded number of review records,
+    \item restrict the multimodal subset to items with successfully downloaded images,
+    \item keep every artifact small enough to support iterative debugging.
+\end{itemize}
+
+\subsection{Why review-side multimodal signals are used by default}
+The proposal ultimately wants item text and product images. In practice, the review file already contained:
+\begin{itemize}[leftmargin=1.5em]
+    \item text fields,
+    \item user behavior,
+    \item review-side image URLs.
+\end{itemize}
+
+Because the product metadata stream was slower and less reliable as a critical-path dependency in this workspace, the bounded implementation defaults to review-side multimodal inputs while preserving the proposal's structural logic:
+\begin{itemize}[leftmargin=1.5em]
+    \item CLIP encoding,
+    \item behavior-aware alignment,
+    \item independent quantization,
+    \item late fusion.
+\end{itemize}
+
+\section{Challenges Faced}
+\subsection{Dataset size and local storage limits}
+The largest practical constraint was storage. The official Amazon CSJ review dump is approximately 25.9\,GiB, while the workspace had materially less free space available. This forced the following engineering choices:
+\begin{itemize}[leftmargin=1.5em]
+    \item download only a bounded prefix of the review file,
+    \item avoid downloading the full metadata dump by default,
+    \item design every stage to tolerate partial local copies.
+\end{itemize}
+
+\subsection{Metadata ingestion bottlenecks}
+Streaming the full remote metadata file to recover a small selected item slice was significantly slower than expected. This created an unfavorable critical path when combined with image downloading and CLIP model loading. The mitigation was:
+\begin{itemize}[leftmargin=1.5em]
+    \item make remote metadata optional,
+    \item default to review-side multimodal fields,
+    \item keep the metadata path available as an enrichment path rather than a blocker.
+\end{itemize}
+
+\subsection{Library compatibility issues}
+The CLIP integration surfaced a version-compatibility issue: the installed Transformers version returned a pooled output object from the CLIP helper path rather than a raw tensor in the form originally assumed. This required explicit output unwrapping logic in the tokenization module.
+
+\subsection{Quantization collapse}
+The initial independent quantization pass produced degenerate code assignments where every item received the same fused sequence. This was a genuine modeling failure, not just a formatting issue. The fix was to add a residual k-means style codebook fitting step after the bounded autoencoder optimization so that the learned codebooks produced discriminative assignments on the small subset.
+
+\subsection{Graph-negative batch instability}
+The first hard-negative implementation sometimes produced variable-length negative sets across anchors, which broke tensor batching. This was corrected by making the negative sampler pad to a fixed count using graph-aware fallback candidates.
+
+\section{Current Status}
+The repository now supports the following bounded end-to-end path:
+\begin{enumerate}[leftmargin=1.5em]
+    \item select a bounded Amazon CSJ subset from real imported review data,
+    \item download review-side images for items with image coverage,
+    \item encode text and image inputs with frozen CLIP,
+    \item train separate behavior-aware projection heads,
+    \item quantize text and image embeddings independently,
+    \item late-fuse the resulting code sequences,
+    \item run the recommender demo using the generated MASI token artifact.
+\end{enumerate}
+
+The key outputs are:
+\begin{itemize}[leftmargin=1.5em]
+    \item \href{/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/masi_token_summary.json}{\texttt{masi\_token\_summary.json}}
+    \item \href{/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl}{\texttt{fused\_semantic\_ids.jsonl}}
+    \item \href{/Users/pradyundevarakonda/Developer/MASI/outputs/recommender_amazon_csj_demo/recommender_demo_summary.json}{\texttt{recommender\_demo\_summary.json}}
+\end{itemize}
+
+\section{Remaining Gaps Relative to the Proposal}
+The implementation is materially closer to the proposal, but it is still not the full research pipeline. The main remaining gaps are:
+\begin{itemize}[leftmargin=1.5em]
+    \item full-product metadata ingestion at scale,
+    \item explicit warm-start versus zero-shot split construction,
+    \item evaluation metrics such as HR@10, NDCG@10, and Coverage@10,
+    \item cold-start inference validation for unseen items,
+    \item broader ablation studies over alignment and codebook depth,
+    \item larger-scale quantization and recommender training beyond the bounded development subset.
+\end{itemize}
+
+\section{Conclusion}
+The repository no longer stops at a recommender placeholder. It now contains a working bounded implementation of the proposal's defining indexing path: frozen multimodal encoders, behavior-aware alignment, independent modality quantization, and late-fused token generation. The engineering work emphasized proposal fidelity under practical workspace constraints, and the remaining work is now clearly concentrated in scale-up, evaluation, and ablation rather than missing architectural foundations.
+
+\end{document}

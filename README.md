@@ -81,6 +81,7 @@ Main artifacts:
 - [scripts/train_masi.py](/Users/pradyundevarakonda/Developer/MASI/scripts/train_masi.py)
 - [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
 - [configs/masi_train_csj_smoke.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_smoke.json)
+- [configs/masi_train_csj_medium_colab.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_medium_colab.json)
 
 What the launcher does:
 
@@ -94,6 +95,12 @@ What the launcher does:
 Verified launcher artifact:
 
 - [outputs/amazon_csj_smoke_train/run_manifest.json](/Users/pradyundevarakonda/Developer/MASI/outputs/amazon_csj_smoke_train/run_manifest.json)
+
+Recommended bounded progression:
+
+- `smoke`: fastest integration check, may skip alignment and fine-tuning if too few multimodal items survive
+- `medium_colab`: larger bounded Colab run that is intended to cover actual Phase 1 alignment, Phase 2 token generation, Phase 3 MLM, and often nonzero sequential fine-tuning examples
+- `full`: proposal-aligned CSJ benchmark path
 
 ## Full Amazon Requirements
 
@@ -276,6 +283,14 @@ Run the proposal-aligned smoke pipeline end to end:
 make train-smoke
 ```
 
+Run the medium-scale bounded Colab config:
+
+```bash
+PYTHONPATH=src python scripts/train_masi.py \
+  --config configs/masi_train_csj_medium_colab.json \
+  --storage-root /content/MASI
+```
+
 Run the full one-click CSJ training path:
 
 ```bash
@@ -331,6 +346,7 @@ Open the demo notebook:
 - [notebooks/01_dataset_and_feature_prep_demo.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/01_dataset_and_feature_prep_demo.ipynb)
 - [notebooks/02_recommender_foundation_demo.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/02_recommender_foundation_demo.ipynb)
 - [notebooks/03_colab_smoke_test.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/03_colab_smoke_test.ipynb)
+- [notebooks/04_colab_smoke_test_fresh_clone.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/04_colab_smoke_test_fresh_clone.ipynb)
 
 Run the later-stage bounded experiment:
 

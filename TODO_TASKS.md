@@ -21,6 +21,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [notebooks/01_dataset_and_feature_prep_demo.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/01_dataset_and_feature_prep_demo.ipynb), [scripts/demo_phase1_prep.py](/Users/pradyundevarakonda/Developer/MASI/scripts/demo_phase1_prep.py)
 - `DONE` Add a Colab bootstrap notebook for the one-click MASI smoke pipeline.
   Artifact: [notebooks/03_colab_smoke_test.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/03_colab_smoke_test.ipynb)
+- `DONE` Add a fresh-clone Colab smoke notebook that always replaces any old `/content/MASI` checkout before running.
+  Artifact: [notebooks/04_colab_smoke_test_fresh_clone.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/04_colab_smoke_test_fresh_clone.ipynb)
 - `DONE` Add a web-sourced reference map for foundational papers and public repositories relevant to MASI.
   Artifact: [docs/reference_repos.md](/Users/pradyundevarakonda/Developer/MASI/docs/reference_repos.md)
 - `DONE` Add the first recommender-side implementation foundation and demo workflow.
@@ -57,6 +59,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Current artifact: filtered JSONL tables and dataset manifest for the demo run under `data/processed/demo/` and `outputs/demo/`.
 - `DONE` Add real Amazon CSJ training configs for smoke and full proposal-aligned runs.
   Artifact: [configs/masi_train_csj_smoke.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_smoke.json), [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
+- `DONE` Add a medium-scale Colab config to cover more of the MASI pipeline than the smoke path without requiring the full CSJ run.
+  Artifact: [configs/masi_train_csj_medium_colab.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_medium_colab.json)
 - `DONE` Add deterministic leave-one-out split generation for warm-start and zero-shot cold-start evaluation.
   Artifact: [src/masi/recommender/evaluation.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/evaluation.py), [scripts/run_masi_experiment.py](/Users/pradyundevarakonda/Developer/MASI/scripts/run_masi_experiment.py), [outputs/masi_experiment_amazon_csj_demo/experiment_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_experiment_amazon_csj_demo/experiment_summary.json)
 - `TODO` Run the full one-click CSJ launcher on a GPU machine with the complete review and metadata files to capture the first non-smoke benchmark artifact.
