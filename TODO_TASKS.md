@@ -31,6 +31,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [docs/masi_implementation_note.tex](/Users/pradyundevarakonda/Developer/MASI/docs/masi_implementation_note.tex)
 - `DONE` Add a one-click MASI launcher for the proposal's primary CSJ benchmark, with resolved configs, checkpoints, and run manifests for local, Kaggle, and Colab runs.
   Artifact: [scripts/train_masi.py](/Users/pradyundevarakonda/Developer/MASI/scripts/train_masi.py), [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json), [configs/masi_train_csj_smoke.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_smoke.json), [outputs/amazon_csj_smoke_train/run_manifest.json](/Users/pradyundevarakonda/Developer/MASI/outputs/amazon_csj_smoke_train/run_manifest.json)
+- `DONE` Reserve a repo-local `Colab_interactions/` workspace for transient Colab-side files and keep all contents untracked.
+  Artifact: `.gitignore`, `Colab_interactions/`
 
 ## Phase 0: Proposal-To-Codebase Translation
 
