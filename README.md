@@ -92,7 +92,7 @@ What the launcher does:
 - enforces iterative user-item `5-core` filtering before subset selection,
 - prefers the local metadata file for text and image fields during full runs,
 - runs Phase 1 alignment, Phase 2 dual quantization, and Phase 3 experiment training in order,
-- writes resolved stage configs, checkpoints, summaries, and a top-level run manifest.
+- writes resolved stage configs, periodic step checkpoints when configured, final checkpoints, summaries, and a top-level run manifest.
 
 Verified launcher artifact:
 
@@ -124,11 +124,25 @@ Why the bounded Kaggle path exists:
 
 What the Kaggle path does:
 
-- downloads a bounded review prefix plus the raw metadata file,
+- reads the bounded raw review and metadata files directly from the attached Kaggle Dataset input `/kaggle/input/masi-amazon-csj-raw`,
 - materializes a local metadata slice for the selected bounded item subset,
 - downloads one validated image per selected item with threaded workers, retries, and resumable `.part` files,
 - runs the same `train_masi.py` launcher against the bounded Kaggle config,
-- packages the resulting manifests, checkpoints, and Phase 1-3 outputs into one zip bundle.
+- packages the resulting manifests, checkpoints, image cache, and Phase 1-3 outputs into one zip bundle that can be reattached to resume a later session.
+
+Where Kaggle checkpoints go:
+
+- the default storage root on Kaggle is `/kaggle/working/masi_artifacts`,
+- a run named `amazon_csj_medium_kaggle_train` writes checkpoints under `/kaggle/working/masi_artifacts/outputs/amazon_csj_medium_kaggle_train/checkpoints/`,
+- final stage checkpoints stay at the phase root, such as `phase12_tokens/behavior_alignment.pt` and `phase3_experiment/generative_recommender.pt`,
+- periodic step checkpoints are retained in sibling directories such as `phase12_tokens/behavior_alignment_steps/step_0000025.pt` and `phase3_experiment/generative_recommender_steps/step_0000025.pt`,
+- the bounded Kaggle config now enables `checkpointing.*_save_steps = 25` and keeps the latest `3` retained step checkpoints per stage.
+
+How not to lose them after the session ends:
+
+- anything under `/kaggle/working` is ephemeral until you explicitly persist it,
+- use the notebook's zip-bundle packaging step and either `Save Version` on the Kaggle notebook or publish the bundle as a private Kaggle Dataset,
+- on the next session, reattach that resume Dataset and unpack it back into `/kaggle/working/masi_artifacts` before rerunning the launcher.
 
 ## Full Amazon Requirements
 
@@ -333,12 +347,12 @@ PYTHONPATH=src .venv/bin/python scripts/train_masi.py \
   --storage-root /path/to/masi_storage
 ```
 
-Run the Kaggle-safe bounded config locally or on Kaggle after downloading the bounded raw files:
+Run the Kaggle-safe bounded config on Kaggle after attaching the raw dataset input `masi-amazon-csj-raw`:
 
 ```bash
 PYTHONPATH=src python scripts/train_masi.py \
   --config configs/masi_train_csj_medium_kaggle.json \
-  --storage-root /path/to/masi_storage
+  --storage-root /kaggle/working/MASI_workdir
 ```
 
 Run the synthetic preprocessing demo:
@@ -377,16 +391,23 @@ Download the Kaggle-safe bounded raw files locally so they can be uploaded as a 
 python scripts/download_kaggle_safe_csj_local.py --output-dir amazon_csj_raw
 ```
 
-Materialize a local metadata slice and download bounded item images with resumable threaded workers:
+Materialize a local metadata slice and download bounded item images with resumable threaded workers after attaching `masi-amazon-csj-raw`:
 
 ```bash
 PYTHONPATH=src python scripts/download_amazon_csj_images.py \
   --config configs/masi_train_csj_medium_kaggle.json \
-  --storage-root /path/to/masi_storage \
+  --storage-root /kaggle/working/MASI_workdir \
   --workers 16 \
   --retries 3 \
   --resume
 ```
+
+For later Kaggle-session resume, the notebook now exports a dataset-ready folder that mirrors the writable `storage_root` layout:
+
+- `outputs/amazon_csj_medium_kaggle_train/`
+- `data/processed/amazon_csj_medium_kaggle/`
+
+Attach that exported dataset as another Kaggle input in a later session, set `RESUME_DATASET_SLUG` in `notebooks/05_kaggle_full_workflow.ipynb`, and the notebook will restore the prior run artifacts before continuing.
 
 Build Phase 1 + Phase 2 MASI fused tokens:
 

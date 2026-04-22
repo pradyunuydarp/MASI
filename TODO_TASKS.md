@@ -25,8 +25,12 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [notebooks/04_colab_smoke_test_fresh_clone.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/04_colab_smoke_test_fresh_clone.ipynb)
 - `DONE` Add a Kaggle-safe bounded workflow with a dedicated notebook, bounded config, and resumable image downloader.
   Artifact: `configs/masi_train_csj_medium_kaggle.json`, `scripts/download_amazon_csj_images.py`, `notebooks/05_kaggle_full_workflow.ipynb`, [src/masi/data/amazon_csj_assets.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/data/amazon_csj_assets.py)
+- `DONE` Add periodic step-based checkpoint emission for bounded Phase 1, Phase 2, and Phase 3 training so Kaggle runs retain recent weights before the session ends.
+  Artifact: [src/masi/common/checkpoints.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/common/checkpoints.py), [src/masi/alignment/behavior_alignment.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/alignment/behavior_alignment.py), [src/masi/tokenization/rqvae.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/rqvae.py), [src/masi/recommender/training.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/training.py), [scripts/build_masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/scripts/build_masi_tokens.py), [scripts/run_masi_experiment.py](/Users/pradyundevarakonda/Developer/MASI/scripts/run_masi_experiment.py), [configs/masi_train_csj_medium_kaggle.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_medium_kaggle.json), [README.md](/Users/pradyundevarakonda/Developer/MASI/README.md)
 - `DONE` Add a local helper script for downloading the bounded raw CSJ files before uploading them as a private Kaggle Dataset.
   Artifact: `scripts/download_kaggle_safe_csj_local.py`
+- `DONE` Switch the Kaggle bounded workflow to read raw files directly from the attached Dataset input `masi-amazon-csj-raw` and restore prior run artifacts from a second resume dataset.
+  Artifact: `configs/masi_train_csj_medium_kaggle.json`, `notebooks/05_kaggle_full_workflow.ipynb`, [README.md](/Users/pradyundevarakonda/Developer/MASI/README.md)
 - `DONE` Add a web-sourced reference map for foundational papers and public repositories relevant to MASI.
   Artifact: [docs/reference_repos.md](/Users/pradyundevarakonda/Developer/MASI/docs/reference_repos.md)
 - `DONE` Add the first recommender-side implementation foundation and demo workflow.

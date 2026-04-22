@@ -101,7 +101,7 @@ def main() -> None:
     if not reviews_path.exists():
         raise FileNotFoundError(
             f"Missing reviews file at {reviews_path}. "
-            "Run scripts/download_amazon_csj_dataset.py first."
+            "Attach the configured raw dataset input or run scripts/download_amazon_csj_dataset.py first."
         )
 
     subset = select_real_amazon_subset(

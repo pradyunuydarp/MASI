@@ -3,14 +3,14 @@
   "runtime": {
     "run_name": "amazon_csj_medium_kaggle_train",
     "resume_if_artifacts_exist": true,
-    "download_reviews_if_missing": true,
-    "download_metadata_if_missing": true,
+    "download_reviews_if_missing": false,
+    "download_metadata_if_missing": false,
     "full_reviews": false,
     "review_range_end": 6442450943
   },
   "dataset": {
-    "reviews_path": "data/raw/amazon_reviews_2023/Clothing_Shoes_and_Jewelry.jsonl",
-    "metadata_path": "data/raw/amazon_reviews_2023/meta_Clothing_Shoes_and_Jewelry.jsonl",
+    "reviews_path": "/kaggle/input/masi-amazon-csj-raw/Clothing_Shoes_and_Jewelry.jsonl",
+    "metadata_path": "/kaggle/input/masi-amazon-csj-raw/meta_Clothing_Shoes_and_Jewelry.jsonl",
     "min_user_interactions": 5,
     "min_item_interactions": 5,
     "max_users": 512,
@@ -67,6 +67,14 @@
     "cold_start_ratio": 0.2,
     "min_train_history": 1,
     "min_sequence_items": 2
+  },
+  "checkpointing": {
+    "alignment_save_steps": 25,
+    "text_rqvae_save_steps": 25,
+    "vision_rqvae_save_steps": 25,
+    "mlm_save_steps": 25,
+    "autoregressive_save_steps": 25,
+    "keep_last": 3
   },
   "method_toggles": {
     "use_behavior_alignment": true,

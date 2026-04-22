@@ -109,6 +109,17 @@ def _ensure_raw_dataset(
         )
         downloaded_metadata = True
 
+    if not reviews_path.exists():
+        raise FileNotFoundError(
+            f"Missing reviews file at {reviews_path}. "
+            "Attach the configured raw dataset input or update `dataset.reviews_path`."
+        )
+    if not metadata_path.exists():
+        raise FileNotFoundError(
+            f"Missing metadata file at {metadata_path}. "
+            "Attach the configured raw dataset input or update `dataset.metadata_path`."
+        )
+
     return {
         "downloaded_reviews": downloaded_reviews,
         "downloaded_metadata": downloaded_metadata,
@@ -189,6 +200,7 @@ def main() -> None:
         "clip": dict(config["clip"]),
         "alignment": dict(config["alignment"]),
         "tokenization": dict(config["tokenization"]),
+        "checkpointing": dict(config.get("checkpointing", {})),
         "method_toggles": dict(config.get("method_toggles", {})),
         "outputs_root": str(token_outputs_root.resolve()),
         "fused_ids_path": str((token_outputs_root / "fused_semantic_ids.jsonl").resolve()),
@@ -217,6 +229,7 @@ def main() -> None:
         "checkpoint_root": str((checkpoint_root / "phase3_experiment").resolve()),
         "token_artifact_path": token_config["fused_ids_path"],
         "require_token_artifact": True,
+        "checkpointing": dict(config.get("checkpointing", {})),
         "method_toggles": dict(config.get("method_toggles", {})),
         "dataset": token_config["dataset"],
     }

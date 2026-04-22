@@ -20,6 +20,7 @@ from pathlib import Path
 import torch
 
 from masi.alignment.behavior_alignment import train_behavior_aware_alignment
+from masi.common.checkpoints import StepCheckpointManager
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
 from masi.common.toggles import MethodToggleConfig
@@ -98,7 +99,16 @@ def main() -> None:
     clip_config = dict(config["clip"])
     alignment_config = dict(config["alignment"])
     tokenization_config = dict(config["tokenization"])
+    checkpointing_config = dict(config.get("checkpointing", {}))
     toggles = MethodToggleConfig.from_mapping(config.get("method_toggles"))
+    toggle_state = asdict(toggles)
+    checkpoint_root = config.get("checkpoint_root")
+    resolved_checkpoint_root = ensure_directory(repo_root / str(checkpoint_root)) if checkpoint_root else None
+    checkpoint_keep_last = (
+        2
+        if checkpointing_config.get("keep_last") is None
+        else _optional_positive_int(checkpointing_config.get("keep_last"))
+    )
 
     subset = select_real_amazon_subset(
         reviews_path=str(dataset_config["reviews_path"]),
@@ -171,6 +181,42 @@ def main() -> None:
     else:
         image_embeddings = {}
 
+    alignment_checkpoint_manager = (
+        StepCheckpointManager(
+            checkpoint_root=resolved_checkpoint_root,
+            stage_name="behavior_alignment_steps",
+            save_steps=_optional_positive_int(checkpointing_config.get("alignment_save_steps")),
+            keep_last=checkpoint_keep_last,
+        )
+        if resolved_checkpoint_root is not None
+        else None
+    )
+
+    def _alignment_checkpoint_callback(
+        *,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        global_step: int,
+        epoch_index: int,
+        step_in_epoch: int,
+        loss: float,
+    ) -> None:
+        if alignment_checkpoint_manager is None:
+            return
+        alignment_checkpoint_manager.maybe_save(
+            global_step=global_step,
+            payload={
+                "config": config,
+                "method_toggles": toggle_state,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "global_step": global_step,
+                "epoch_index": epoch_index,
+                "step_in_epoch": step_in_epoch,
+                "loss": loss,
+            },
+        )
+
     alignment_result = train_behavior_aware_alignment(
         text_embeddings=text_embeddings,
         image_embeddings=image_embeddings,
@@ -186,6 +232,7 @@ def main() -> None:
         device=device,
         seed=seed,
         use_behavior_alignment=toggles.use_behavior_alignment,
+        checkpoint_callback=_alignment_checkpoint_callback,
     )
 
     text_quantizer_model = None
@@ -193,6 +240,42 @@ def main() -> None:
     text_quantization = None
     image_quantization = None
     if toggles.use_text_modality:
+        text_checkpoint_manager = (
+            StepCheckpointManager(
+                checkpoint_root=resolved_checkpoint_root,
+                stage_name="text_rqvae_steps",
+                save_steps=_optional_positive_int(checkpointing_config.get("text_rqvae_save_steps")),
+                keep_last=checkpoint_keep_last,
+            )
+            if resolved_checkpoint_root is not None
+            else None
+        )
+
+        def _text_rqvae_checkpoint_callback(
+            *,
+            model: torch.nn.Module,
+            optimizer: torch.optim.Optimizer,
+            global_step: int,
+            epoch_index: int,
+            step_in_epoch: int,
+            loss: float,
+        ) -> None:
+            if text_checkpoint_manager is None:
+                return
+            text_checkpoint_manager.maybe_save(
+                global_step=global_step,
+                payload={
+                    "config": config,
+                    "modality": "text",
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "global_step": global_step,
+                    "epoch_index": epoch_index,
+                    "step_in_epoch": step_in_epoch,
+                    "loss": loss,
+                },
+            )
+
         text_quantizer_model, text_quantization = train_rqvae_model(
             # Text and image quantizers are trained separately on purpose. This is
             # the core late-fusion design decision in the proposal.
@@ -209,8 +292,47 @@ def main() -> None:
             refit_codebooks_with_residual_kmeans=bool(
                 tokenization_config.get("refit_codebooks_with_residual_kmeans", False)
             ),
+            checkpoint_callback=_text_rqvae_checkpoint_callback,
         )
+    else:
+        text_checkpoint_manager = None
     if toggles.use_visual_modality:
+        image_checkpoint_manager = (
+            StepCheckpointManager(
+                checkpoint_root=resolved_checkpoint_root,
+                stage_name="vision_rqvae_steps",
+                save_steps=_optional_positive_int(checkpointing_config.get("vision_rqvae_save_steps")),
+                keep_last=checkpoint_keep_last,
+            )
+            if resolved_checkpoint_root is not None
+            else None
+        )
+
+        def _vision_rqvae_checkpoint_callback(
+            *,
+            model: torch.nn.Module,
+            optimizer: torch.optim.Optimizer,
+            global_step: int,
+            epoch_index: int,
+            step_in_epoch: int,
+            loss: float,
+        ) -> None:
+            if image_checkpoint_manager is None:
+                return
+            image_checkpoint_manager.maybe_save(
+                global_step=global_step,
+                payload={
+                    "config": config,
+                    "modality": "vision",
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "global_step": global_step,
+                    "epoch_index": epoch_index,
+                    "step_in_epoch": step_in_epoch,
+                    "loss": loss,
+                },
+            )
+
         image_quantizer_model, image_quantization = train_rqvae_model(
             embeddings_by_item=alignment_result.aligned_image_embeddings,
             latent_dim=int(tokenization_config["latent_dim"]),
@@ -225,7 +347,10 @@ def main() -> None:
             refit_codebooks_with_residual_kmeans=bool(
                 tokenization_config.get("refit_codebooks_with_residual_kmeans", False)
             ),
+            checkpoint_callback=_vision_rqvae_checkpoint_callback,
         )
+    else:
+        image_checkpoint_manager = None
 
     fused_ids = build_fused_ids_from_quantized_codes(
         # The fused artifact is the handoff boundary into the recommender
@@ -247,16 +372,31 @@ def main() -> None:
         alignment_status = "skipped_no_positive_pairs"
     else:
         alignment_status = "skipped"
-    checkpoint_root = config.get("checkpoint_root")
     checkpoint_paths: dict[str, str] = {}
-    if checkpoint_root:
-        resolved_checkpoint_root = ensure_directory(repo_root / str(checkpoint_root))
+    periodic_checkpoint_dirs: dict[str, str] = {}
+    periodic_latest_checkpoint_paths: dict[str, str] = {}
+    if alignment_checkpoint_manager is not None and alignment_checkpoint_manager.enabled:
+        periodic_checkpoint_dirs["behavior_alignment"] = str(alignment_checkpoint_manager.stage_directory)
+        latest_alignment_checkpoint = alignment_checkpoint_manager.latest_checkpoint()
+        if latest_alignment_checkpoint is not None:
+            periodic_latest_checkpoint_paths["behavior_alignment"] = latest_alignment_checkpoint
+    if text_checkpoint_manager is not None and text_checkpoint_manager.enabled:
+        periodic_checkpoint_dirs["text_rqvae"] = str(text_checkpoint_manager.stage_directory)
+        latest_text_checkpoint = text_checkpoint_manager.latest_checkpoint()
+        if latest_text_checkpoint is not None:
+            periodic_latest_checkpoint_paths["text_rqvae"] = latest_text_checkpoint
+    if image_checkpoint_manager is not None and image_checkpoint_manager.enabled:
+        periodic_checkpoint_dirs["vision_rqvae"] = str(image_checkpoint_manager.stage_directory)
+        latest_image_checkpoint = image_checkpoint_manager.latest_checkpoint()
+        if latest_image_checkpoint is not None:
+            periodic_latest_checkpoint_paths["vision_rqvae"] = latest_image_checkpoint
+    if resolved_checkpoint_root is not None:
         if alignment_result.model_state_dict is not None:
             alignment_checkpoint_path = resolved_checkpoint_root / "behavior_alignment.pt"
             torch.save(
                 {
                     "config": config,
-                    "method_toggles": asdict(toggles),
+                    "method_toggles": toggle_state,
                     "model_state_dict": alignment_result.model_state_dict,
                 },
                 alignment_checkpoint_path,
@@ -312,6 +452,8 @@ def main() -> None:
         "unique_visual_code_sequences": len({tuple(fused_id.visual_codes) for fused_id in fused_ids}),
         "fused_ids_path": str(fused_ids_path),
         "checkpoint_paths": checkpoint_paths,
+        "periodic_checkpoint_dirs": periodic_checkpoint_dirs,
+        "periodic_latest_checkpoint_paths": periodic_latest_checkpoint_paths,
     }
     summary_path = write_json(summary, outputs_root / "masi_token_summary.json")
     print(json.dumps(summary, indent=2))

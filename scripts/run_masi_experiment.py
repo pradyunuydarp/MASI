@@ -21,6 +21,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
+from masi.common.checkpoints import StepCheckpointManager
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
 from masi.common.toggles import MethodToggleConfig
@@ -149,7 +150,16 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     toggles = MethodToggleConfig.from_mapping(config.get("method_toggles"))
+    toggle_state = asdict(toggles)
     device = _select_device()
+    checkpointing_config = dict(config.get("checkpointing", {}))
+    checkpoint_root = config.get("checkpoint_root")
+    resolved_checkpoint_root = ensure_directory(repo_root / str(checkpoint_root)) if checkpoint_root else None
+    checkpoint_keep_last = (
+        2
+        if checkpointing_config.get("keep_last") is None
+        else _optional_positive_int(checkpointing_config.get("keep_last"))
+    )
 
     fused_ids, user_histories, import_summary = _prepare_inputs(config=config, toggles=toggles)
     vocabulary = TokenVocabulary.build(
@@ -227,6 +237,45 @@ def main() -> None:
         max_sequence_length=mlm_max_tokens,
     ).to(device)
 
+    mlm_checkpoint_manager = (
+        StepCheckpointManager(
+            checkpoint_root=resolved_checkpoint_root,
+            stage_name="cross_modal_mlm_steps",
+            save_steps=_optional_positive_int(checkpointing_config.get("mlm_save_steps")),
+            keep_last=checkpoint_keep_last,
+        )
+        if resolved_checkpoint_root is not None
+        else None
+    )
+
+    def _mlm_checkpoint_callback(
+        *,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        objective: str,
+        global_step: int,
+        epoch_index: int,
+        step_in_epoch: int,
+        loss: float,
+    ) -> None:
+        if mlm_checkpoint_manager is None:
+            return
+        mlm_checkpoint_manager.maybe_save(
+            global_step=global_step,
+            payload={
+                "config": config,
+                "method_toggles": toggle_state,
+                "objective": objective,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "vocabulary": vocabulary.token_to_id,
+                "global_step": global_step,
+                "epoch_index": epoch_index,
+                "step_in_epoch": step_in_epoch,
+                "loss": loss,
+            },
+        )
+
     mlm_history: list[float] = []
     if toggles.use_cross_modal_mlm and len(mlm_dataset) > 0:
         mlm_optimizer = torch.optim.AdamW(mlm_model.parameters(), lr=float(config["learning_rate"]))
@@ -240,11 +289,52 @@ def main() -> None:
             label_key="label_token_ids",
             epochs=int(config["mlm_epochs"]),
             device=device,
+            checkpoint_callback=_mlm_checkpoint_callback,
         )
         initialize_generative_from_mlm(
             generative_model=generative_model,
             mlm_model=mlm_model,
             use_cross_modal_mlm=True,
+        )
+
+    generative_checkpoint_manager = (
+        StepCheckpointManager(
+            checkpoint_root=resolved_checkpoint_root,
+            stage_name="generative_recommender_steps",
+            save_steps=_optional_positive_int(checkpointing_config.get("autoregressive_save_steps")),
+            keep_last=checkpoint_keep_last,
+        )
+        if resolved_checkpoint_root is not None
+        else None
+    )
+
+    def _generative_checkpoint_callback(
+        *,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        objective: str,
+        global_step: int,
+        epoch_index: int,
+        step_in_epoch: int,
+        loss: float,
+    ) -> None:
+        if generative_checkpoint_manager is None:
+            return
+        generative_checkpoint_manager.maybe_save(
+            global_step=global_step,
+            payload={
+                "config": config,
+                "method_toggles": toggle_state,
+                "objective": objective,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "vocabulary": vocabulary.token_to_id,
+                "item_tokens": item_tokens,
+                "global_step": global_step,
+                "epoch_index": epoch_index,
+                "step_in_epoch": step_in_epoch,
+                "loss": loss,
+            },
         )
 
     generative_history: list[float] = []
@@ -274,6 +364,7 @@ def main() -> None:
             label_key="label_token_ids",
             epochs=int(config["autoregressive_epochs"]),
             device=device,
+            checkpoint_callback=_generative_checkpoint_callback,
         )
 
     candidate_item_ids = sorted(item_tokens)
@@ -327,15 +418,25 @@ def main() -> None:
         }
 
     outputs_root = ensure_directory(repo_root / str(config["outputs_root"]))
-    checkpoint_root = config.get("checkpoint_root")
     checkpoint_paths: dict[str, str] = {}
-    if checkpoint_root:
-        resolved_checkpoint_root = ensure_directory(repo_root / str(checkpoint_root))
+    periodic_checkpoint_dirs: dict[str, str] = {}
+    periodic_latest_checkpoint_paths: dict[str, str] = {}
+    if mlm_checkpoint_manager is not None and mlm_checkpoint_manager.enabled:
+        periodic_checkpoint_dirs["cross_modal_mlm"] = str(mlm_checkpoint_manager.stage_directory)
+        latest_mlm_checkpoint = mlm_checkpoint_manager.latest_checkpoint()
+        if latest_mlm_checkpoint is not None:
+            periodic_latest_checkpoint_paths["cross_modal_mlm"] = latest_mlm_checkpoint
+    if generative_checkpoint_manager is not None and generative_checkpoint_manager.enabled:
+        periodic_checkpoint_dirs["generative_recommender"] = str(generative_checkpoint_manager.stage_directory)
+        latest_generative_checkpoint = generative_checkpoint_manager.latest_checkpoint()
+        if latest_generative_checkpoint is not None:
+            periodic_latest_checkpoint_paths["generative_recommender"] = latest_generative_checkpoint
+    if resolved_checkpoint_root is not None:
         generative_checkpoint_path = resolved_checkpoint_root / "generative_recommender.pt"
         torch.save(
             {
                 "config": config,
-                "method_toggles": asdict(toggles),
+                "method_toggles": toggle_state,
                 "model_state_dict": generative_model.state_dict(),
                 "vocabulary": vocabulary.token_to_id,
                 "item_tokens": item_tokens,
@@ -349,7 +450,7 @@ def main() -> None:
             torch.save(
                 {
                     "config": config,
-                    "method_toggles": asdict(toggles),
+                    "method_toggles": toggle_state,
                     "model_state_dict": mlm_model.state_dict(),
                     "vocabulary": vocabulary.token_to_id,
                 },
@@ -377,6 +478,8 @@ def main() -> None:
         "sample_generation": sample_generation,
         "import_summary": import_summary,
         "checkpoint_paths": checkpoint_paths,
+        "periodic_checkpoint_dirs": periodic_checkpoint_dirs,
+        "periodic_latest_checkpoint_paths": periodic_latest_checkpoint_paths,
     }
     summary_path = write_json(summary, outputs_root / "experiment_summary.json")
     print(json.dumps(summary, indent=2))

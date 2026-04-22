@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from random import Random
+from typing import Callable
 
 import torch
 from torch import nn
@@ -188,6 +189,7 @@ def train_behavior_aware_alignment(
     device: torch.device,
     seed: int,
     use_behavior_alignment: bool = True,
+    checkpoint_callback: Callable[..., None] | None = None,
 ) -> AlignmentResult:
     """Train the Phase 1 behavior-aware projection heads."""
 
@@ -242,6 +244,7 @@ def train_behavior_aware_alignment(
     negative_pool = build_graph_negative_pool(user_histories)
     rng = Random(seed)
     loss_history: list[float] = []
+    global_step = 0
 
     if not positive_pairs:
         # Small smoke subsets can lose all collaborative pairs after modality
@@ -259,11 +262,11 @@ def train_behavior_aware_alignment(
             model_state_dict=None,
         )
 
-    for _ in range(epochs):
+    for epoch_index in range(epochs):
         shuffled_pairs = list(positive_pairs)
         rng.shuffle(shuffled_pairs)
 
-        for start in range(0, len(shuffled_pairs), batch_size):
+        for batch_index, start in enumerate(range(0, len(shuffled_pairs), batch_size), start=1):
             # Each batch is constructed in item-pair space rather than user
             # space because the proposal's alignment objective operates over
             # collaborative item-item positives extracted from the graph.
@@ -325,7 +328,19 @@ def train_behavior_aware_alignment(
             loss = text_loss + image_loss
             loss.backward()
             optimizer.step()
-            loss_history.append(float(loss.detach().cpu().item()))
+            loss_value = float(loss.detach().cpu().item())
+            loss_history.append(loss_value)
+            global_step += 1
+
+            if checkpoint_callback is not None:
+                checkpoint_callback(
+                    model=model,
+                    optimizer=optimizer,
+                    global_step=global_step,
+                    epoch_index=epoch_index + 1,
+                    step_in_epoch=batch_index,
+                    loss=loss_value,
+                )
 
     with torch.no_grad():
         aligned_text_embeddings = {

@@ -12,6 +12,7 @@ state:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 import torch
 from torch import nn
@@ -187,6 +188,7 @@ def train_rqvae_model(
     device: torch.device,
     seed: int,
     refit_codebooks_with_residual_kmeans: bool = False,
+    checkpoint_callback: Callable[..., None] | None = None,
 ) -> tuple[RQVAEModel, QuantizationResult]:
     """Train an RQ-VAE-style model on one modality's aligned embeddings."""
 
@@ -202,12 +204,13 @@ def train_rqvae_model(
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     generator = torch.Generator().manual_seed(seed)
     loss_history: list[float] = []
+    global_step = 0
 
-    for _ in range(epochs):
+    for epoch_index in range(epochs):
         permutation = torch.randperm(data.size(0), generator=generator)
         shuffled = data[permutation]
 
-        for start in range(0, shuffled.size(0), batch_size):
+        for batch_index, start in enumerate(range(0, shuffled.size(0), batch_size), start=1):
             # The learned encoder/decoder pair gives the quantizer a smoother
             # latent space before we freeze the final code assignments with the
             # residual k-means fit below.
@@ -219,7 +222,19 @@ def train_rqvae_model(
             loss = reconstruction_loss + commitment_weight * commitment_loss
             loss.backward()
             optimizer.step()
-            loss_history.append(float(loss.detach().cpu().item()))
+            loss_value = float(loss.detach().cpu().item())
+            loss_history.append(loss_value)
+            global_step += 1
+
+            if checkpoint_callback is not None:
+                checkpoint_callback(
+                    model=model,
+                    optimizer=optimizer,
+                    global_step=global_step,
+                    epoch_index=epoch_index + 1,
+                    step_in_epoch=batch_index,
+                    loss=loss_value,
+                )
 
     with torch.no_grad():
         latent_data = model.encoder(data.to(device))

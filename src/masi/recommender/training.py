@@ -8,6 +8,7 @@ graduates to a fuller experiment runner.
 from __future__ import annotations
 
 from statistics import mean
+from typing import Callable
 
 import torch
 from torch import nn
@@ -70,26 +71,38 @@ def run_training_epochs(
     label_key: str,
     epochs: int,
     device: torch.device,
+    checkpoint_callback: Callable[..., None] | None = None,
 ) -> list[float]:
     """Train a model for multiple epochs and return mean epoch losses."""
 
     epoch_losses: list[float] = []
     model.to(device)
-    for _ in range(epochs):
+    global_step = 0
+    for epoch_index in range(epochs):
         batch_losses: list[float] = []
-        for batch in data_loader:
+        for batch_index, batch in enumerate(data_loader, start=1):
             batch_inputs = batch[input_key].to(device)
             batch_labels = batch[label_key].to(device)
-            batch_losses.append(
-                training_step(
+            loss_value = training_step(
+                model=model,
+                optimizer=optimizer,
+                batch_inputs=batch_inputs,
+                batch_labels=batch_labels,
+                objective=objective,
+                pad_token_id=pad_token_id,
+            )
+            batch_losses.append(loss_value)
+            global_step += 1
+            if checkpoint_callback is not None:
+                checkpoint_callback(
                     model=model,
                     optimizer=optimizer,
-                    batch_inputs=batch_inputs,
-                    batch_labels=batch_labels,
                     objective=objective,
-                    pad_token_id=pad_token_id,
+                    global_step=global_step,
+                    epoch_index=epoch_index + 1,
+                    step_in_epoch=batch_index,
+                    loss=loss_value,
                 )
-            )
         epoch_losses.append(mean(batch_losses) if batch_losses else 0.0)
     return epoch_losses
 
