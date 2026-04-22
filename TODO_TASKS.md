@@ -23,6 +23,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [notebooks/03_colab_smoke_test.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/03_colab_smoke_test.ipynb)
 - `DONE` Add a fresh-clone Colab smoke notebook that always replaces any old `/content/MASI` checkout before running.
   Artifact: [notebooks/04_colab_smoke_test_fresh_clone.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/04_colab_smoke_test_fresh_clone.ipynb)
+- `DONE` Add a Kaggle-safe bounded workflow with a dedicated notebook, bounded config, and resumable image downloader.
+  Artifact: `configs/masi_train_csj_medium_kaggle.json`, `scripts/download_amazon_csj_images.py`, `notebooks/05_kaggle_full_workflow.ipynb`, [src/masi/data/amazon_csj_assets.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/data/amazon_csj_assets.py)
 - `DONE` Add a web-sourced reference map for foundational papers and public repositories relevant to MASI.
   Artifact: [docs/reference_repos.md](/Users/pradyundevarakonda/Developer/MASI/docs/reference_repos.md)
 - `DONE` Add the first recommender-side implementation foundation and demo workflow.
@@ -63,9 +65,13 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [configs/masi_train_csj_smoke.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_smoke.json), [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
 - `DONE` Add a medium-scale Colab config to cover more of the MASI pipeline than the smoke path without requiring the full CSJ run.
   Artifact: [configs/masi_train_csj_medium_colab.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_medium_colab.json)
+- `DONE` Add a bounded Kaggle config that prefers local metadata slices and threaded resumable image downloads over remote metadata streaming.
+  Artifact: `configs/masi_train_csj_medium_kaggle.json`, `scripts/download_amazon_csj_images.py`
 - `DONE` Add deterministic leave-one-out split generation for warm-start and zero-shot cold-start evaluation.
   Artifact: [src/masi/recommender/evaluation.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/evaluation.py), [scripts/run_masi_experiment.py](/Users/pradyundevarakonda/Developer/MASI/scripts/run_masi_experiment.py), [outputs/masi_experiment_amazon_csj_demo/experiment_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_experiment_amazon_csj_demo/experiment_summary.json)
+- `TODO` Run the bounded Kaggle workflow and capture the first Kaggle-produced checkpoint bundle and run manifest.
 - `TODO` Run the full one-click CSJ launcher on a GPU machine with the complete review and metadata files to capture the first non-smoke benchmark artifact.
+  Note: full CSJ still requires more storage than Kaggle's ephemeral disk once the raw files and full image cache are combined.
 
 ## Phase 2: Behavior-Aware Contrastive Alignment
 

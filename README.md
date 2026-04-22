@@ -70,7 +70,8 @@ These baselines define the evaluation bar for cold-start hit rate, coverage, and
 - CLIP extraction and RQ-VAE training run on `cuda`, `mps`, or `cpu`, but the proposal-aligned full CSJ path is GPU-preferred.
 - The later-stage Phase 3 modules now use `cuda` when available, otherwise `mps`, otherwise `cpu`.
 - On Apple Silicon, the Phase 3 Transformer stack disables PyTorch's nested-tensor fast path so MLM pretraining and generative ranking can run on `mps` without falling back to CPU.
-- The one-click full CSJ launcher is intended for a GPU-backed Kaggle notebook, Colab session, or lab workstation with enough disk for raw reviews, metadata, image caches, checkpoints, and outputs.
+- The one-click full CSJ launcher is intended for a lab workstation or hosted runtime with enough disk for raw reviews, metadata, image caches, checkpoints, and outputs.
+- Kaggle is now treated as a bounded-run target rather than a full-CSJ target because the raw review dump, raw metadata dump, and full image cache do not fit safely inside one ephemeral session.
 
 ## One-Click CSJ Training
 
@@ -82,6 +83,7 @@ Main artifacts:
 - [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
 - [configs/masi_train_csj_smoke.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_smoke.json)
 - [configs/masi_train_csj_medium_colab.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_medium_colab.json)
+- `configs/masi_train_csj_medium_kaggle.json`
 
 What the launcher does:
 
@@ -100,7 +102,33 @@ Recommended bounded progression:
 
 - `smoke`: fastest integration check, may skip alignment and fine-tuning if too few multimodal items survive
 - `medium_colab`: larger bounded Colab run that is intended to cover actual Phase 1 alignment, Phase 2 token generation, Phase 3 MLM, and often nonzero sequential fine-tuning examples
+- `medium_kaggle`: Kaggle-safe bounded run with local metadata slicing and resumable threaded image downloads
 - `full`: proposal-aligned CSJ benchmark path
+
+## Kaggle-Safe Bounded Workflow
+
+The repository now includes a Kaggle-specific bounded workflow for Amazon CSJ that keeps the proposal-aligned stage ordering while avoiding Kaggle's disk and session limits.
+
+Main artifacts:
+
+- `configs/masi_train_csj_medium_kaggle.json`
+- `scripts/download_amazon_csj_images.py`
+- `notebooks/05_kaggle_full_workflow.ipynb`
+
+Why the bounded Kaggle path exists:
+
+- the raw CSJ reviews file is about `27.8 GB`,
+- the raw CSJ metadata file is about `18.0 GB`,
+- the combined raw payload already consumes about `42.6 GiB`,
+- the full `5-core` item catalog is large enough that a full local image cache is not Kaggle-safe.
+
+What the Kaggle path does:
+
+- downloads a bounded review prefix plus the raw metadata file,
+- materializes a local metadata slice for the selected bounded item subset,
+- downloads one validated image per selected item with threaded workers, retries, and resumable `.part` files,
+- runs the same `train_masi.py` launcher against the bounded Kaggle config,
+- packages the resulting manifests, checkpoints, and Phase 1-3 outputs into one zip bundle.
 
 ## Full Amazon Requirements
 
@@ -297,11 +325,19 @@ Run the full one-click CSJ training path:
 make train-full
 ```
 
-Run the same full path with an explicit storage root, which is useful for Kaggle, Colab, or an attached lab disk:
+Run the same full path with an explicit storage root, which is useful for Colab or an attached lab disk:
 
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/train_masi.py \
   --config configs/masi_train_csj_full.json \
+  --storage-root /path/to/masi_storage
+```
+
+Run the Kaggle-safe bounded config locally or on Kaggle after downloading the bounded raw files:
+
+```bash
+PYTHONPATH=src python scripts/train_masi.py \
+  --config configs/masi_train_csj_medium_kaggle.json \
   --storage-root /path/to/masi_storage
 ```
 
@@ -335,6 +371,17 @@ Download the full CSJ reviews file and metadata file:
 PYTHONPATH=src python3 scripts/download_amazon_csj_dataset.py --full-reviews --download-metadata
 ```
 
+Materialize a local metadata slice and download bounded item images with resumable threaded workers:
+
+```bash
+PYTHONPATH=src python scripts/download_amazon_csj_images.py \
+  --config configs/masi_train_csj_medium_kaggle.json \
+  --storage-root /path/to/masi_storage \
+  --workers 16 \
+  --retries 3 \
+  --resume
+```
+
 Build Phase 1 + Phase 2 MASI fused tokens:
 
 ```bash
@@ -347,6 +394,7 @@ Open the demo notebook:
 - [notebooks/02_recommender_foundation_demo.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/02_recommender_foundation_demo.ipynb)
 - [notebooks/03_colab_smoke_test.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/03_colab_smoke_test.ipynb)
 - [notebooks/04_colab_smoke_test_fresh_clone.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/04_colab_smoke_test_fresh_clone.ipynb)
+- `notebooks/05_kaggle_full_workflow.ipynb`
 
 Run the later-stage bounded experiment:
 

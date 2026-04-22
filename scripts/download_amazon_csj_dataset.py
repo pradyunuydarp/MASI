@@ -11,6 +11,7 @@ review file.
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -63,11 +64,41 @@ def parse_args() -> argparse.Namespace:
 def download(url: str, destination: Path, *, range_end: int | None = None) -> None:
     """Download one file with optional byte-range bounding via `curl`."""
 
-    command = ["curl", "-L", "--continue-at", "-", "--output", str(destination)]
-    if range_end is not None:
-        command.extend(["--range", f"0-{range_end}"])
-    command.append(url)
+    destination = Path(destination).expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    if range_end is None:
+        command = ["curl", "-L", "--continue-at", "-", "--output", str(destination), url]
+        subprocess.run(command, check=True)
+        return
+
+    complete_size = int(range_end) + 1
+    existing_size = destination.stat().st_size if destination.exists() else 0
+    if existing_size >= complete_size:
+        return
+
+    if existing_size == 0:
+        command = ["curl", "-L", "--output", str(destination), "--range", f"0-{range_end}", url]
+        subprocess.run(command, check=True)
+        return
+
+    partial_destination = destination.with_suffix(destination.suffix + ".part")
+    if partial_destination.exists():
+        partial_destination.unlink()
+
+    command = [
+        "curl",
+        "-L",
+        "--output",
+        str(partial_destination),
+        "--range",
+        f"{existing_size}-{range_end}",
+        url,
+    ]
     subprocess.run(command, check=True)
+    with partial_destination.open("rb") as source_handle, destination.open("ab") as destination_handle:
+        shutil.copyfileobj(source_handle, destination_handle)
+    partial_destination.unlink()
 
 
 def main() -> None:

@@ -25,6 +25,7 @@ import sys
 
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
+from masi.common.runtime import detect_runtime_environment, resolve_path, resolve_storage_root
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,56 +48,6 @@ def parse_args() -> argparse.Namespace:
         help="Re-run stage scripts even if their output summaries already exist.",
     )
     return parser.parse_args()
-
-
-def _detect_runtime_environment() -> str:
-    """Infer the current execution environment."""
-
-    if os.getenv("KAGGLE_KERNEL_RUN_TYPE"):
-        return "kaggle"
-    if os.getenv("COLAB_RELEASE_TAG") or os.getenv("COLAB_GPU"):
-        return "colab"
-    return "local"
-
-
-def _resolve_storage_root(
-    *,
-    repo_root: Path,
-    config: dict[str, object],
-    cli_storage_root: str | None,
-) -> Path:
-    """Resolve the storage root used for datasets and run artifacts."""
-
-    runtime_config = dict(config.get("runtime", {}))
-    environment = _detect_runtime_environment()
-
-    if cli_storage_root:
-        return ensure_directory(cli_storage_root)
-
-    env_override = os.getenv("MASI_STORAGE_ROOT")
-    if env_override:
-        return ensure_directory(env_override)
-
-    configured_storage_root = runtime_config.get("storage_root")
-    if configured_storage_root:
-        return ensure_directory(configured_storage_root)
-
-    if environment == "kaggle":
-        return ensure_directory("/kaggle/working/masi_artifacts")
-    if environment == "colab":
-        return ensure_directory("/content/masi_artifacts")
-    return repo_root
-
-
-def _resolve_path(storage_root: Path, path_value: str | None) -> Path | None:
-    """Resolve a configured path against the storage root unless absolute."""
-
-    if not path_value:
-        return None
-    candidate = Path(path_value).expanduser()
-    if candidate.is_absolute():
-        return candidate
-    return storage_root / candidate
 
 
 def _run_python_script(
@@ -173,14 +124,14 @@ def main() -> None:
     loaded = load_json_config(args.config)
     config = loaded.data
     repo_root = find_repo_root(loaded.path)
-    environment = _detect_runtime_environment()
-    storage_root = _resolve_storage_root(
+    runtime_config = dict(config.get("runtime", {}))
+    environment = detect_runtime_environment()
+    storage_root = resolve_storage_root(
         repo_root=repo_root,
-        config=config,
+        runtime_config=runtime_config,
         cli_storage_root=args.storage_root,
     )
 
-    runtime_config = dict(config.get("runtime", {}))
     dataset_config = dict(config["dataset"])
     assets_config = dict(config.get("assets", {}))
 
@@ -189,8 +140,8 @@ def main() -> None:
     resolved_config_root = ensure_directory(run_root / "resolved_configs")
     checkpoint_root = ensure_directory(run_root / "checkpoints")
 
-    reviews_path = _resolve_path(storage_root, str(dataset_config["reviews_path"]))
-    metadata_path = _resolve_path(storage_root, str(dataset_config["metadata_path"]))
+    reviews_path = resolve_path(storage_root, str(dataset_config["reviews_path"]))
+    metadata_path = resolve_path(storage_root, str(dataset_config["metadata_path"]))
     assert reviews_path is not None
     assert metadata_path is not None
 
@@ -203,11 +154,11 @@ def main() -> None:
 
     token_outputs_root = ensure_directory(run_root / "phase12_tokens")
     experiment_outputs_root = ensure_directory(run_root / "phase3_experiment")
-    image_cache_dir = _resolve_path(
+    image_cache_dir = resolve_path(
         storage_root,
         str(assets_config.get("image_cache_dir", f"data/processed/{run_name}/images")),
     )
-    metadata_cache_path = _resolve_path(
+    metadata_cache_path = resolve_path(
         storage_root,
         str(assets_config.get("metadata_cache_path", f"data/processed/{run_name}/metadata.slice.jsonl")),
     )
@@ -230,6 +181,10 @@ def main() -> None:
             "use_remote_metadata": bool(assets_config.get("use_remote_metadata", False)),
             "metadata_cache_path": str(metadata_cache_path.resolve()),
             "image_cache_dir": str(image_cache_dir.resolve()),
+            "image_download_workers": int(assets_config.get("image_download_workers", 1)),
+            "image_download_retries": int(assets_config.get("image_download_retries", 0)),
+            "image_download_timeout_seconds": int(assets_config.get("image_download_timeout_seconds", 30)),
+            "image_download_resume": bool(assets_config.get("image_download_resume", True)),
         },
         "clip": dict(config["clip"]),
         "alignment": dict(config["alignment"]),

@@ -24,9 +24,8 @@ from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
 from masi.common.toggles import MethodToggleConfig
 from masi.data.amazon_csj_assets import (
-    download_item_images,
-    fetch_metadata_slice_for_items,
-    load_metadata_slice_from_file,
+    download_item_images_with_options,
+    resolve_metadata_records_for_items,
 )
 from masi.recommender.amazon_data import select_real_amazon_subset
 from masi.tokenization.masi_tokens import (
@@ -112,33 +111,30 @@ def main() -> None:
     )
 
     modality_records = dict(subset.item_records)
-    metadata_by_item: dict[str, dict[str, object]] = {}
-    metadata_source = "review_side_images_and_text"
-    metadata_local_path = assets_config.get("metadata_local_path")
-    if metadata_local_path:
-        resolved_metadata_path = (repo_root / str(metadata_local_path)).expanduser()
-        if resolved_metadata_path.exists():
-            metadata_by_item = load_metadata_slice_from_file(
-                item_ids=set(subset.item_records),
-                metadata_path=resolved_metadata_path,
-            )
-            metadata_source = "local_metadata_file"
-    if not metadata_by_item and bool(assets_config.get("use_remote_metadata", False)):
-        # Remote metadata remains a fallback path for environments where the
-        # full metadata file has not been downloaded locally.
-        metadata_by_item = fetch_metadata_slice_for_items(
-            item_ids=set(subset.item_records),
-            output_path=repo_root / str(assets_config["metadata_cache_path"]),
-        )
-        if metadata_by_item:
-            metadata_source = "remote_metadata_stream"
+    metadata_result = resolve_metadata_records_for_items(
+        item_ids=set(subset.item_records),
+        metadata_local_path=(repo_root / str(assets_config["metadata_local_path"]))
+        if assets_config.get("metadata_local_path")
+        else None,
+        metadata_cache_path=(repo_root / str(assets_config["metadata_cache_path"]))
+        if assets_config.get("metadata_cache_path")
+        else None,
+        use_remote_metadata=bool(assets_config.get("use_remote_metadata", False)),
+    )
+    metadata_by_item = metadata_result.metadata_by_item
+    metadata_source = metadata_result.metadata_source
     if metadata_by_item:
         modality_records.update(metadata_by_item)
 
-    image_paths = download_item_images(
+    image_download_result = download_item_images_with_options(
         metadata_by_item=modality_records,
         image_cache_dir=repo_root / str(assets_config["image_cache_dir"]),
+        workers=int(assets_config.get("image_download_workers", 1)),
+        retries=int(assets_config.get("image_download_retries", 0)),
+        timeout_seconds=int(assets_config.get("image_download_timeout_seconds", 30)),
+        resume=bool(assets_config.get("image_download_resume", True)),
     )
+    image_paths = image_download_result.image_paths_by_item
 
     device = select_device()
     text_embeddings, image_embeddings = encode_clip_embeddings(
@@ -295,7 +291,11 @@ def main() -> None:
         "device": str(device),
         "subset_summary": subset.summary,
         "metadata_records_found": len(metadata_by_item),
-        "image_files_downloaded": len(image_paths),
+        "image_files_downloaded": len(image_download_result.downloaded_item_ids),
+        "image_files_reused": len(image_download_result.skipped_existing_item_ids),
+        "image_files_available": len(image_paths),
+        "image_download_failures": len(image_download_result.failed_item_ids),
+        "items_missing_image_urls": len(image_download_result.missing_url_item_ids),
         "items_with_full_modalities": len(used_item_ids),
         "users_after_modality_filter": len(filtered_histories),
         "method_toggles": asdict(toggles),
