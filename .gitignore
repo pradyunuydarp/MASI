@@ -11,3 +11,5 @@ docs/*.pdf
 # local scratch files
 Request.md
 Colab_interactions/
+amazon_csj_raw/
+scripts/download_kaggle_safe_csj_local.py

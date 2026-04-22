@@ -25,6 +25,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [notebooks/04_colab_smoke_test_fresh_clone.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/04_colab_smoke_test_fresh_clone.ipynb)
 - `DONE` Add a Kaggle-safe bounded workflow with a dedicated notebook, bounded config, and resumable image downloader.
   Artifact: `configs/masi_train_csj_medium_kaggle.json`, `scripts/download_amazon_csj_images.py`, `notebooks/05_kaggle_full_workflow.ipynb`, [src/masi/data/amazon_csj_assets.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/data/amazon_csj_assets.py)
+- `DONE` Add a local helper script for downloading the bounded raw CSJ files before uploading them as a private Kaggle Dataset.
+  Artifact: `scripts/download_kaggle_safe_csj_local.py`
 - `DONE` Add a web-sourced reference map for foundational papers and public repositories relevant to MASI.
   Artifact: [docs/reference_repos.md](/Users/pradyundevarakonda/Developer/MASI/docs/reference_repos.md)
 - `DONE` Add the first recommender-side implementation foundation and demo workflow.

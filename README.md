@@ -371,6 +371,12 @@ Download the full CSJ reviews file and metadata file:
 PYTHONPATH=src python3 scripts/download_amazon_csj_dataset.py --full-reviews --download-metadata
 ```
 
+Download the Kaggle-safe bounded raw files locally so they can be uploaded as a private Kaggle Dataset input later:
+
+```bash
+python scripts/download_kaggle_safe_csj_local.py --output-dir amazon_csj_raw
+```
+
 Materialize a local metadata slice and download bounded item images with resumable threaded workers:
 
 ```bash
