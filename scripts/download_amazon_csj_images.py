@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-download and validate Amazon CSJ item images for a bounded MASI run."""
+"""Validate or fetch missing item images for a bounded MASI run."""
 
 from __future__ import annotations
 
@@ -8,12 +8,18 @@ import json
 
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
-from masi.common.runtime import detect_runtime_environment, resolve_path, resolve_storage_root
+from masi.common.runtime import (
+    detect_runtime_environment,
+    find_kaggle_dataset_root,
+    resolve_input_path,
+    resolve_path,
+    resolve_storage_root,
+)
 from masi.data.amazon_csj_assets import (
     download_item_images_with_options,
     resolve_metadata_records_for_items,
 )
-from masi.recommender.amazon_data import select_real_amazon_subset
+from masi.data.amazon_csj_subset import select_real_amazon_subset
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,8 +28,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
-        default="configs/masi_train_csj_medium_kaggle.json",
-        help="Path to the bounded training config used to choose the item subset.",
+        default="configs/masi_train_csj_subset_large.json",
+        help="Path to the bounded training config used to choose the subset and image roots.",
     )
     parser.add_argument(
         "--storage-root",
@@ -71,7 +77,7 @@ def main() -> None:
     args = parse_args()
     loaded = load_json_config(args.config)
     config = loaded.data
-    repo_root = find_repo_root(loaded.path)
+    repo_root = find_repo_root(Path(__file__))
     runtime_config = dict(config.get("runtime", {}))
     dataset_config = dict(config["dataset"])
     assets_config = dict(config.get("assets", {}))
@@ -83,8 +89,27 @@ def main() -> None:
         cli_storage_root=args.storage_root,
     )
 
-    reviews_path = resolve_path(storage_root, str(dataset_config["reviews_path"]))
-    metadata_path = resolve_path(storage_root, str(dataset_config["metadata_path"]))
+    dataset_root = find_kaggle_dataset_root(
+        dataset_slugs=dataset_config.get("kaggle_input_slugs"),
+        required_relative_paths=[
+            dataset_config.get("reviews_relpath") or dataset_config.get("reviews_path"),
+            dataset_config.get("metadata_relpath") or dataset_config.get("metadata_path"),
+        ],
+    )
+    reviews_path = resolve_input_path(
+        repo_root=repo_root,
+        storage_root=storage_root,
+        configured_path=str(dataset_config.get("reviews_path", "")),
+        kaggle_dataset_root=dataset_root,
+        relative_path=str(dataset_config.get("reviews_relpath", "")).strip() or None,
+    )
+    metadata_path = resolve_input_path(
+        repo_root=repo_root,
+        storage_root=storage_root,
+        configured_path=str(dataset_config.get("metadata_path", "")),
+        kaggle_dataset_root=dataset_root,
+        relative_path=str(dataset_config.get("metadata_relpath", "")).strip() or None,
+    )
     image_cache_dir = resolve_path(
         storage_root,
         str(assets_config.get("image_cache_dir", "data/processed/amazon_csj_images/images")),
@@ -98,10 +123,22 @@ def main() -> None:
     assert image_cache_dir is not None
     assert metadata_cache_path is not None
 
+    resolved_dataset_root = dataset_root
+    if resolved_dataset_root is None and reviews_path.exists() and metadata_path.exists() and reviews_path.parent == metadata_path.parent:
+        resolved_dataset_root = reviews_path.parent
+    preloaded_image_dir = resolve_input_path(
+        repo_root=repo_root,
+        storage_root=storage_root,
+        configured_path=str(assets_config.get("preloaded_images_path", "")).strip() or None,
+        kaggle_dataset_root=resolved_dataset_root,
+        relative_path=str(assets_config.get("preloaded_images_relpath", "")).strip() or None,
+    )
+    preloaded_image_dirs = [preloaded_image_dir] if preloaded_image_dir is not None and preloaded_image_dir.exists() else []
+
     if not reviews_path.exists():
         raise FileNotFoundError(
             f"Missing reviews file at {reviews_path}. "
-            "Attach the configured raw dataset input or run scripts/download_amazon_csj_dataset.py first."
+            "Attach the configured prepared subset dataset or update the dataset input paths."
         )
 
     subset = select_real_amazon_subset(
@@ -141,6 +178,8 @@ def main() -> None:
         retries=retries,
         timeout_seconds=timeout_seconds,
         resume=resume,
+        readonly_image_dirs=preloaded_image_dirs,
+        download_missing=bool(assets_config.get("download_missing_images", True)),
     )
 
     run_name = str(runtime_config.get("run_name", "masi_train_csj"))
@@ -151,12 +190,14 @@ def main() -> None:
         "run_root": str(run_root.resolve()),
         "run_name": run_name,
         "subset_summary": subset.summary,
+        "dataset_root": str(resolved_dataset_root.resolve()) if resolved_dataset_root is not None else None,
         "selected_item_count": len(subset.item_records),
         "selected_user_count": len(subset.user_histories),
         "metadata_records_found": len(metadata_result.metadata_by_item),
         "metadata_source": metadata_result.metadata_source,
         "metadata_cache_path": str(metadata_cache_path.resolve()),
         "image_cache_dir": str(image_cache_dir.resolve()),
+        "preloaded_image_dirs": [str(path.resolve()) for path in preloaded_image_dirs],
         "workers": workers,
         "retries": retries,
         "timeout_seconds": timeout_seconds,
@@ -164,6 +205,7 @@ def main() -> None:
         "successful_item_count": len(download_result.image_paths_by_item),
         "downloaded_item_count": len(download_result.downloaded_item_ids),
         "reused_item_count": len(download_result.skipped_existing_item_ids),
+        "reused_preloaded_item_count": len(download_result.reused_preloaded_item_ids),
         "failed_item_count": len(download_result.failed_item_ids),
         "missing_url_item_count": len(download_result.missing_url_item_ids),
         "failed_item_ids": download_result.failed_item_ids,

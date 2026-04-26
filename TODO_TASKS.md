@@ -25,12 +25,20 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [notebooks/04_colab_smoke_test_fresh_clone.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/04_colab_smoke_test_fresh_clone.ipynb)
 - `DONE` Add a Kaggle-safe bounded workflow with a dedicated notebook, bounded config, and resumable image downloader.
   Artifact: `configs/masi_train_csj_medium_kaggle.json`, `scripts/download_amazon_csj_images.py`, `notebooks/05_kaggle_full_workflow.ipynb`, [src/masi/data/amazon_csj_assets.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/data/amazon_csj_assets.py)
+- `DONE` Add a dedicated Kaggle notebook for the medium smoke test with setup, optional resume restore, image prefetch, training, summary inspection, and export steps.
+  Artifact: [notebooks/06_kaggle_medium_smoke_test.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/06_kaggle_medium_smoke_test.ipynb), [README.md](/Users/pradyundevarakonda/Developer/MASI/README.md)
+- `DONE` Add a fresh Kaggle notebook that bootstraps MASI from GitHub, validates attached inputs early, runs the bounded medium pipeline, verifies required artifacts, and exports a resume-ready bundle without depending on the older Kaggle notebooks.
+  Artifact: [notebooks/07_kaggle_github_bootstrap_medium_run.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/07_kaggle_github_bootstrap_medium_run.ipynb), [README.md](/Users/pradyundevarakonda/Developer/MASI/README.md)
 - `DONE` Add periodic step-based checkpoint emission for bounded Phase 1, Phase 2, and Phase 3 training so Kaggle runs retain recent weights before the session ends.
   Artifact: [src/masi/common/checkpoints.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/common/checkpoints.py), [src/masi/alignment/behavior_alignment.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/alignment/behavior_alignment.py), [src/masi/tokenization/rqvae.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/rqvae.py), [src/masi/recommender/training.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/training.py), [scripts/build_masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/scripts/build_masi_tokens.py), [scripts/run_masi_experiment.py](/Users/pradyundevarakonda/Developer/MASI/scripts/run_masi_experiment.py), [configs/masi_train_csj_medium_kaggle.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_medium_kaggle.json), [README.md](/Users/pradyundevarakonda/Developer/MASI/README.md)
 - `DONE` Add a local helper script for downloading the bounded raw CSJ files before uploading them as a private Kaggle Dataset.
   Artifact: `scripts/download_kaggle_safe_csj_local.py`
 - `DONE` Switch the Kaggle bounded workflow to read raw files directly from the attached Dataset input `masi-amazon-csj-raw` and restore prior run artifacts from a second resume dataset.
   Artifact: `configs/masi_train_csj_medium_kaggle.json`, `notebooks/05_kaggle_full_workflow.ipynb`, [README.md](/Users/pradyundevarakonda/Developer/MASI/README.md)
+- `DONE` Add a subset-first CSJ preparation workflow with deterministic local slicing, local image downloading, prepared-dataset Kaggle discovery, and preloaded-image reuse during training.
+  Artifact: [scripts/prepare_amazon_csj_subset.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/prepare_amazon_csj_subset.py), [scripts/download_amazon_csj_subset_images.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/download_amazon_csj_subset_images.py), [src/masi/data/amazon_csj_subset.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/data/amazon_csj_subset.py), [src/masi/data/amazon_csj_assets.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/data/amazon_csj_assets.py), [src/masi/common/runtime.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/common/runtime.py), [scripts/train_masi.py](/Users/pradyundevarakonda/Developer/MASI/scripts/train_masi.py), [scripts/download_amazon_csj_images.py](/Users/pradyundevarakonda/Developer/MASI/scripts/download_amazon_csj_images.py)
+- `DONE` Add canonical prepared-subset training configs for bounded medium and large CSJ runs and switch the default Kaggle notebook to the prepared subset contract.
+  Artifact: [configs/masi_train_csj_subset_medium.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_medium.json), [configs/masi_train_csj_subset_large.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_large.json), [notebooks/07_kaggle_github_bootstrap_medium_run.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/07_kaggle_github_bootstrap_medium_run.ipynb), [README.md](/Users/pradyundevarakonda/Developer/MASI/README.md)
 - `DONE` Add a web-sourced reference map for foundational papers and public repositories relevant to MASI.
   Artifact: [docs/reference_repos.md](/Users/pradyundevarakonda/Developer/MASI/docs/reference_repos.md)
 - `DONE` Add the first recommender-side implementation foundation and demo workflow.
@@ -53,8 +61,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
 
 ## Phase 1: Data And Feature Preparation
 
-- `IN_PROGRESS` Acquire and register the Amazon Reviews 2023 Clothing/Shoes/Jewelry subset.
-  Current artifact: official imported review file prefix in `data/raw/amazon_reviews_2023/Clothing_Shoes_and_Jewelry.jsonl`; full raw review file is larger than currently available disk space.
+- `IN_PROGRESS` Acquire and register prepared Amazon Reviews 2023 Clothing/Shoes/Jewelry subsets for bounded training.
+  Current artifact: subset preparation and image-download scripts plus canonical medium and large subset configs for Kaggle-backed runs.
 - `DONE` Implement 5-core filtering for users and items.
   Artifact: [src/masi/data/amazon2023.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/data/amazon2023.py)
 - `DONE` Build ETL scaffolding for item text, metadata, image references, and user interaction sequences.
@@ -73,11 +81,13 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [configs/masi_train_csj_medium_colab.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_medium_colab.json)
 - `DONE` Add a bounded Kaggle config that prefers local metadata slices and threaded resumable image downloads over remote metadata streaming.
   Artifact: `configs/masi_train_csj_medium_kaggle.json`, `scripts/download_amazon_csj_images.py`
+- `DONE` Add canonical prepared subset configs for the new bounded medium and large training targets.
+  Artifact: [configs/masi_train_csj_subset_medium.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_medium.json), [configs/masi_train_csj_subset_large.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_large.json)
 - `DONE` Add deterministic leave-one-out split generation for warm-start and zero-shot cold-start evaluation.
   Artifact: [src/masi/recommender/evaluation.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/evaluation.py), [scripts/run_masi_experiment.py](/Users/pradyundevarakonda/Developer/MASI/scripts/run_masi_experiment.py), [outputs/masi_experiment_amazon_csj_demo/experiment_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_experiment_amazon_csj_demo/experiment_summary.json)
-- `TODO` Run the bounded Kaggle workflow and capture the first Kaggle-produced checkpoint bundle and run manifest.
-- `TODO` Run the full one-click CSJ launcher on a GPU machine with the complete review and metadata files to capture the first non-smoke benchmark artifact.
-  Note: full CSJ still requires more storage than Kaggle's ephemeral disk once the raw files and full image cache are combined.
+- `TODO` Run the prepared subset medium Kaggle workflow through [notebooks/07_kaggle_github_bootstrap_medium_run.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/07_kaggle_github_bootstrap_medium_run.ipynb) and capture the first Kaggle-produced checkpoint bundle and run manifest.
+- `TODO` Prepare and upload the first canonical `masi-amazon-csj-subset-large` Kaggle Dataset with `subset_manifest.json`, `image_download_manifest.json`, and the full `images/` directory.
+- `BLOCKED` Superseded the near-term raw full-CSJ benchmark run with the subset-first canonical workflow; keep the full-corpus path only as a deferred reference until storage, preprocessing, and evaluation scaling work land.
 
 ## Phase 2: Behavior-Aware Contrastive Alignment
 
@@ -102,6 +112,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [src/masi/tokenization/rqvae.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/rqvae.py)
 - `DONE` Choose and document the default codebook depth and size for proposal-aligned full training.
   Decision: the current full-train default is `D=3` with `K=256` per modality, with depth sweeps still tracked as ablations. Artifact: [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
+- `DONE` Choose and document the default codebook depth and size for the canonical bounded subset training configs.
+  Decision: the current subset-medium and subset-large defaults use `D=3` with `K=128` per modality to keep single-session Kaggle runs tractable. Artifact: [configs/masi_train_csj_subset_medium.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_medium.json), [configs/masi_train_csj_subset_large.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_large.json)
 - `DONE` Generate text semantic IDs from projected text embeddings for the bounded Amazon MASI token build.
   Artifact: [outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl)
 - `DONE` Generate visual semantic IDs from projected visual embeddings for the bounded Amazon MASI token build.

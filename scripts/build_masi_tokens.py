@@ -28,7 +28,7 @@ from masi.data.amazon_csj_assets import (
     download_item_images_with_options,
     resolve_metadata_records_for_items,
 )
-from masi.recommender.amazon_data import select_real_amazon_subset
+from masi.data.amazon_csj_subset import select_real_amazon_subset
 from masi.tokenization.masi_tokens import (
     build_fused_ids_from_quantized_codes,
     encode_clip_embeddings,
@@ -54,7 +54,7 @@ def _load_config(config_path: str) -> tuple[dict[str, object], Path]:
     """Load the JSON config and infer the repository root."""
 
     loaded = load_json_config(config_path)
-    repo_root = find_repo_root(loaded.path)
+    repo_root = find_repo_root(Path(__file__))
     return loaded.data, repo_root
 
 
@@ -81,6 +81,22 @@ def _optional_positive_int(value: object) -> int | None:
         return None
     parsed = int(value)
     return parsed if parsed > 0 else None
+
+
+def _resolve_path_list(values: object, *, repo_root: Path) -> list[Path]:
+    """Resolve configured path lists against the repository root."""
+
+    if values is None:
+        return []
+    if isinstance(values, (str, Path)):
+        items = [values]
+    else:
+        items = list(values)
+    resolved: list[Path] = []
+    for item in items:
+        candidate = Path(str(item)).expanduser()
+        resolved.append(candidate if candidate.is_absolute() else repo_root / candidate)
+    return resolved
 
 
 def main() -> None:
@@ -136,6 +152,12 @@ def main() -> None:
     if metadata_by_item:
         modality_records.update(metadata_by_item)
 
+    preloaded_image_dirs = _resolve_path_list(
+        assets_config.get("preloaded_image_dirs"),
+        repo_root=repo_root,
+    )
+    download_missing_images = bool(assets_config.get("download_missing_images", True))
+
     image_download_result = download_item_images_with_options(
         metadata_by_item=modality_records,
         image_cache_dir=repo_root / str(assets_config["image_cache_dir"]),
@@ -143,6 +165,8 @@ def main() -> None:
         retries=int(assets_config.get("image_download_retries", 0)),
         timeout_seconds=int(assets_config.get("image_download_timeout_seconds", 30)),
         resume=bool(assets_config.get("image_download_resume", True)),
+        readonly_image_dirs=preloaded_image_dirs,
+        download_missing=download_missing_images,
     )
     image_paths = image_download_result.image_paths_by_item
 
@@ -433,6 +457,7 @@ def main() -> None:
         "metadata_records_found": len(metadata_by_item),
         "image_files_downloaded": len(image_download_result.downloaded_item_ids),
         "image_files_reused": len(image_download_result.skipped_existing_item_ids),
+        "image_files_reused_from_preloaded_dirs": len(image_download_result.reused_preloaded_item_ids),
         "image_files_available": len(image_paths),
         "image_download_failures": len(image_download_result.failed_item_ids),
         "items_missing_image_urls": len(image_download_result.missing_url_item_ids),
@@ -448,6 +473,8 @@ def main() -> None:
         if text_quantization and text_quantization.reconstruction_loss_history else None,
         "image_quantization_last_loss": image_quantization.reconstruction_loss_history[-1]
         if image_quantization and image_quantization.reconstruction_loss_history else None,
+        "preloaded_image_dirs": [str(path.resolve()) for path in preloaded_image_dirs],
+        "download_missing_images": download_missing_images,
         "unique_text_code_sequences": len({tuple(fused_id.text_codes) for fused_id in fused_ids}),
         "unique_visual_code_sequences": len({tuple(fused_id.visual_codes) for fused_id in fused_ids}),
         "fused_ids_path": str(fused_ids_path),

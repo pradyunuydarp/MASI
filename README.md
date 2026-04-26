@@ -67,108 +67,103 @@ These baselines define the evaluation bar for cold-start hit rate, coverage, and
 
 ## Hardware Assumptions
 
-- CLIP extraction and RQ-VAE training run on `cuda`, `mps`, or `cpu`, but the proposal-aligned full CSJ path is GPU-preferred.
+- CLIP extraction and RQ-VAE training run on `cuda`, `mps`, or `cpu`, but the bounded subset configs are GPU-preferred for practical turnaround.
 - The later-stage Phase 3 modules now use `cuda` when available, otherwise `mps`, otherwise `cpu`.
 - On Apple Silicon, the Phase 3 Transformer stack disables PyTorch's nested-tensor fast path so MLM pretraining and generative ranking can run on `mps` without falling back to CPU.
-- The one-click full CSJ launcher is intended for a lab workstation or hosted runtime with enough disk for raw reviews, metadata, image caches, checkpoints, and outputs.
-- Kaggle is now treated as a bounded-run target rather than a full-CSJ target because the raw review dump, raw metadata dump, and full image cache do not fit safely inside one ephemeral session.
+- The canonical workflow is now subset-first: prepare a bounded CSJ dataset locally, download images locally on CPU, upload that prepared dataset to Kaggle, and train from the prepared slice without redownloading the full raw files or image set.
+- Kaggle remains a bounded-run target rather than a raw full-CSJ target because the raw review dump, raw metadata dump, and full image cache do not fit safely inside one ephemeral session.
 
-## One-Click CSJ Training
+## Subset-First CSJ Training
 
-The repository now has a single-entry training path for the proposal's primary benchmark setting: Amazon Reviews 2023 `Clothing_Shoes_and_Jewelry` with iterative `5-core` filtering.
+The repository now treats a prepared sliced Amazon Reviews 2023 `Clothing_Shoes_and_Jewelry` dataset as the main training input for bounded MASI runs.
 
 Main artifacts:
 
+- [scripts/prepare_amazon_csj_subset.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/prepare_amazon_csj_subset.py)
+- [scripts/download_amazon_csj_subset_images.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/download_amazon_csj_subset_images.py)
 - [scripts/train_masi.py](/Users/pradyundevarakonda/Developer/MASI/scripts/train_masi.py)
-- [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
+- [scripts/download_amazon_csj_images.py](/Users/pradyundevarakonda/Developer/MASI/scripts/download_amazon_csj_images.py)
+- [configs/masi_train_csj_subset_medium.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_medium.json)
+- [configs/masi_train_csj_subset_large.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_large.json)
 - [configs/masi_train_csj_smoke.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_smoke.json)
 - [configs/masi_train_csj_medium_colab.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_medium_colab.json)
-- `configs/masi_train_csj_medium_kaggle.json`
+
+Canonical workflow:
+
+1. download raw CSJ reviews and metadata locally,
+2. prepare a deterministic bounded subset locally,
+3. download one validated image per selected item locally on CPU,
+4. upload the prepared subset dataset to Kaggle,
+5. run `train_masi.py` against the prepared dataset and reuse attached images directly.
 
 What the launcher does:
 
 - resolves a storage root for local, Kaggle, or Colab runs,
-- downloads the CSJ reviews and metadata files when configured and missing,
-- enforces iterative user-item `5-core` filtering before subset selection,
-- prefers the local metadata file for text and image fields during full runs,
+- discovers prepared subset datasets under `/kaggle/input/<slug>` or `/kaggle/input/datasets/<user>/<slug>`,
+- falls back to local configured dataset paths when running outside Kaggle,
+- reuses preloaded read-only images from the attached prepared dataset and only downloads missing items into the writable cache,
 - runs Phase 1 alignment, Phase 2 dual quantization, and Phase 3 experiment training in order,
 - writes resolved stage configs, periodic step checkpoints when configured, final checkpoints, summaries, and a top-level run manifest.
+
+Recommended bounded progression:
+
+- `smoke`: fastest integration check, may skip alignment and fine-tuning if too few multimodal items survive
+- `subset_medium`: faster bounded iteration target for Kaggle and local regression checks
+- `subset_large`: canonical bounded training target sized for a single Kaggle session with resume support available
+- `medium_colab`: older bounded Colab path retained for comparison and non-Kaggle experimentation
 
 Verified launcher artifact:
 
 - [outputs/amazon_csj_smoke_train/run_manifest.json](/Users/pradyundevarakonda/Developer/MASI/outputs/amazon_csj_smoke_train/run_manifest.json)
 
-Recommended bounded progression:
+## Kaggle Prepared Dataset Contract
 
-- `smoke`: fastest integration check, may skip alignment and fine-tuning if too few multimodal items survive
-- `medium_colab`: larger bounded Colab run that is intended to cover actual Phase 1 alignment, Phase 2 token generation, Phase 3 MLM, and often nonzero sequential fine-tuning examples
-- `medium_kaggle`: Kaggle-safe bounded run with local metadata slicing and resumable threaded image downloads
-- `full`: proposal-aligned CSJ benchmark path
+The standard prepared subset dataset layout is:
 
-## Kaggle-Safe Bounded Workflow
+- `Clothing_Shoes_and_Jewelry.jsonl`
+- `meta_Clothing_Shoes_and_Jewelry.jsonl`
+- `images/`
+- `subset_manifest.json`
+- `image_download_manifest.json`
 
-The repository now includes a Kaggle-specific bounded workflow for Amazon CSJ that keeps the proposal-aligned stage ordering while avoiding Kaggle's disk and session limits.
+Recommended Kaggle Dataset names:
 
-Main artifacts:
-
-- `configs/masi_train_csj_medium_kaggle.json`
-- `scripts/download_amazon_csj_images.py`
-- `notebooks/05_kaggle_full_workflow.ipynb`
-
-Why the bounded Kaggle path exists:
-
-- the raw CSJ reviews file is about `27.8 GB`,
-- the raw CSJ metadata file is about `18.0 GB`,
-- the combined raw payload already consumes about `42.6 GiB`,
-- the full `5-core` item catalog is large enough that a full local image cache is not Kaggle-safe.
+- `masi-amazon-csj-subset-medium`
+- `masi-amazon-csj-subset-large`
 
 What the Kaggle path does:
 
-- reads the bounded raw review and metadata files directly from the attached Kaggle Dataset input `/kaggle/input/masi-amazon-csj-raw`,
-- materializes a local metadata slice for the selected bounded item subset,
-- downloads one validated image per selected item with threaded workers, retries, and resumable `.part` files,
-- runs the same `train_masi.py` launcher against the bounded Kaggle config,
-- packages the resulting manifests, checkpoints, image cache, and Phase 1-3 outputs into one zip bundle that can be reattached to resume a later session.
+- discovers the prepared subset dataset by slug across Kaggle's direct and nested dataset mount layouts,
+- bootstraps a fresh writable repo checkout from `https://github.com/pradyunuydarp/MASI.git` into `/kaggle/working/MASI`,
+- validates preloaded images from the attached dataset and downloads only missing ones into `/kaggle/working/masi_artifacts/data/processed/...`,
+- runs the same `train_masi.py` launcher against the prepared subset config,
+- packages the resulting manifests, checkpoints, and any writable-cache artifacts into one zip bundle that can be reattached to resume a later session.
 
 Where Kaggle checkpoints go:
 
 - the default storage root on Kaggle is `/kaggle/working/masi_artifacts`,
-- a run named `amazon_csj_medium_kaggle_train` writes checkpoints under `/kaggle/working/masi_artifacts/outputs/amazon_csj_medium_kaggle_train/checkpoints/`,
+- a medium run writes checkpoints under `/kaggle/working/masi_artifacts/outputs/amazon_csj_subset_medium_train/checkpoints/`,
+- a large run writes checkpoints under `/kaggle/working/masi_artifacts/outputs/amazon_csj_subset_large_train/checkpoints/`,
 - final stage checkpoints stay at the phase root, such as `phase12_tokens/behavior_alignment.pt` and `phase3_experiment/generative_recommender.pt`,
-- periodic step checkpoints are retained in sibling directories such as `phase12_tokens/behavior_alignment_steps/step_0000025.pt` and `phase3_experiment/generative_recommender_steps/step_0000025.pt`,
-- the bounded Kaggle config now enables `checkpointing.*_save_steps = 25` and keeps the latest `3` retained step checkpoints per stage.
+- periodic step checkpoints are retained in sibling directories such as `phase12_tokens/behavior_alignment_steps/step_0000025.pt` and `phase3_experiment/generative_recommender_steps/step_0000025.pt`.
 
 How not to lose them after the session ends:
 
 - anything under `/kaggle/working` is ephemeral until you explicitly persist it,
 - use the notebook's zip-bundle packaging step and either `Save Version` on the Kaggle notebook or publish the bundle as a private Kaggle Dataset,
-- on the next session, reattach that resume Dataset and unpack it back into `/kaggle/working/masi_artifacts` before rerunning the launcher.
+- on the next session, reattach that resume dataset and unpack it back into `/kaggle/working/masi_artifacts` before rerunning the launcher.
 
-## Full Amazon Requirements
+## Deferred Full-Corpus Path
 
-The repository is now ready for one-click full-CSJ training, which is the proposal's primary dataset target. Running MASI on the entire Amazon Reviews 2023 corpus is a separate engineering tier and still requires additional infrastructure.
+The raw full-CSJ launcher and configs are retained only as a deferred reference path. They are no longer the main documented workflow because full-corpus MASI still requires additional infrastructure beyond a bounded single-machine or Kaggle session setup.
 
-Minimum practical requirements:
+Minimum practical requirements for the deferred full path:
 
 - sharded storage outside git for raw reviews, metadata, image caches, embeddings, checkpoints, and run artifacts,
 - resumable preprocessing and training stages with manifest-based progress tracking,
 - deterministic split generation and seed handling across shards,
 - batched or indexed retrieval for evaluation instead of the current exhaustive per-item scoring path,
 - a GPU-preferred training environment with enough disk budget for cached multimodal features.
-
-Expected full-corpus work areas:
-
-- sharded ingestion for review and metadata tables,
-- large-scale image validation and caching,
-- cached CLIP text and image feature extraction,
-- checkpointed Phase 1 projection-head training,
-- checkpointed Phase 2 dual quantization,
-- optimized Phase 3 evaluation over a large candidate catalog,
-- baseline reproduction and ablation sweeps on the same splits.
-
-Current limitation:
-
-- the repository is not yet ready for an end-to-end full Amazon Reviews 2023 run without additional scaling work in storage layout, preprocessing, and evaluation.
 
 ## Implemented First Slice
 
@@ -274,6 +269,7 @@ Main artifacts:
 - [scripts/run_masi_experiment.py](/Users/pradyundevarakonda/Developer/MASI/scripts/run_masi_experiment.py)
 - [scripts/train_masi.py](/Users/pradyundevarakonda/Developer/MASI/scripts/train_masi.py)
 - [configs/masi_experiment_amazon_csj_demo.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_experiment_amazon_csj_demo.json)
+- [configs/masi_train_csj_subset_large.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_large.json)
 - [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
 
 Verified experiment artifact:
@@ -333,26 +329,20 @@ PYTHONPATH=src python scripts/train_masi.py \
   --storage-root /content/MASI
 ```
 
-Run the full one-click CSJ training path:
-
-```bash
-make train-full
-```
-
-Run the same full path with an explicit storage root, which is useful for Colab or an attached lab disk:
+Run the canonical bounded large subset config:
 
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/train_masi.py \
-  --config configs/masi_train_csj_full.json \
+  --config configs/masi_train_csj_subset_large.json \
   --storage-root /path/to/masi_storage
 ```
 
-Run the Kaggle-safe bounded config on Kaggle after attaching the raw dataset input `masi-amazon-csj-raw`:
+Run the faster bounded medium subset config:
 
 ```bash
-PYTHONPATH=src python scripts/train_masi.py \
-  --config configs/masi_train_csj_medium_kaggle.json \
-  --storage-root /kaggle/working/MASI_workdir
+PYTHONPATH=src .venv/bin/python scripts/train_masi.py \
+  --config configs/masi_train_csj_subset_medium.json \
+  --storage-root /path/to/masi_storage
 ```
 
 Run the synthetic preprocessing demo:
@@ -385,29 +375,64 @@ Download the full CSJ reviews file and metadata file:
 PYTHONPATH=src python3 scripts/download_amazon_csj_dataset.py --full-reviews --download-metadata
 ```
 
-Download the Kaggle-safe bounded raw files locally so they can be uploaded as a private Kaggle Dataset input later:
+Prepare the canonical bounded large subset locally:
 
 ```bash
-python scripts/download_kaggle_safe_csj_local.py --output-dir amazon_csj_raw
+PYTHONPATH=src python scripts/prepare_amazon_csj_subset.py \
+  --reviews-path /path/to/raw/Clothing_Shoes_and_Jewelry.jsonl \
+  --metadata-path /path/to/raw/meta_Clothing_Shoes_and_Jewelry.jsonl \
+  --output-dir /path/to/masi-amazon-csj-subset-large \
+  --preset large
 ```
 
-Materialize a local metadata slice and download bounded item images with resumable threaded workers after attaching `masi-amazon-csj-raw`:
+Prepare the faster bounded medium subset locally:
 
 ```bash
-PYTHONPATH=src python scripts/download_amazon_csj_images.py \
-  --config configs/masi_train_csj_medium_kaggle.json \
-  --storage-root /kaggle/working/MASI_workdir \
-  --workers 16 \
-  --retries 3 \
+PYTHONPATH=src python scripts/prepare_amazon_csj_subset.py \
+  --reviews-path /path/to/raw/Clothing_Shoes_and_Jewelry.jsonl \
+  --metadata-path /path/to/raw/meta_Clothing_Shoes_and_Jewelry.jsonl \
+  --output-dir /path/to/masi-amazon-csj-subset-medium \
+  --preset medium
+```
+
+Download validated subset images locally into the prepared dataset:
+
+```bash
+PYTHONPATH=src python scripts/download_amazon_csj_subset_images.py \
+  --metadata-path /path/to/masi-amazon-csj-subset-large/meta_Clothing_Shoes_and_Jewelry.jsonl \
+  --output-dir /path/to/masi-amazon-csj-subset-large \
+  --workers 8 \
+  --retries 2 \
   --resume
 ```
 
-For later Kaggle-session resume, the notebook now exports a dataset-ready folder that mirrors the writable `storage_root` layout:
+Run the subset-medium config on Kaggle after attaching the prepared subset dataset `masi-amazon-csj-subset-medium`:
 
-- `outputs/amazon_csj_medium_kaggle_train/`
-- `data/processed/amazon_csj_medium_kaggle/`
+```bash
+PYTHONPATH=src python scripts/train_masi.py \
+  --config configs/masi_train_csj_subset_medium.json \
+  --storage-root /kaggle/working/masi_artifacts
+```
 
-Attach that exported dataset as another Kaggle input in a later session, set `RESUME_DATASET_SLUG` in `notebooks/05_kaggle_full_workflow.ipynb`, and the notebook will restore the prior run artifacts before continuing.
+Validate preloaded subset images on Kaggle and download only missing ones into the writable cache:
+
+```bash
+PYTHONPATH=src python scripts/download_amazon_csj_images.py \
+  --config configs/masi_train_csj_subset_medium.json \
+  --storage-root /kaggle/working/masi_artifacts \
+  --workers 8 \
+  --retries 2 \
+  --resume
+```
+
+For later Kaggle-session resume, the notebooks export a dataset-ready folder that mirrors the writable `storage_root` layout:
+
+- `outputs/amazon_csj_subset_medium_train/`
+- `data/processed/amazon_csj_subset_medium/`
+
+Use [notebooks/07_kaggle_github_bootstrap_medium_run.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/07_kaggle_github_bootstrap_medium_run.ipynb) as the default Kaggle entrypoint for the prepared subset medium run. It validates the attached prepared dataset first, clones the repo from GitHub into `/kaggle/working/MASI`, installs `.[recommender]`, optionally restores a resume bundle, optionally validates and backfills missing images, runs `train_masi.py`, verifies the required manifests, and exports a dataset-ready bundle. Keep [notebooks/06_kaggle_medium_smoke_test.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/06_kaggle_medium_smoke_test.ipynb) and [notebooks/05_kaggle_full_workflow.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/05_kaggle_full_workflow.ipynb) only as older Kaggle variants.
+
+The raw full-CSJ path is still retained as a deferred reference config, but it is no longer the main README workflow.
 
 Build Phase 1 + Phase 2 MASI fused tokens:
 
@@ -421,7 +446,9 @@ Open the demo notebook:
 - [notebooks/02_recommender_foundation_demo.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/02_recommender_foundation_demo.ipynb)
 - [notebooks/03_colab_smoke_test.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/03_colab_smoke_test.ipynb)
 - [notebooks/04_colab_smoke_test_fresh_clone.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/04_colab_smoke_test_fresh_clone.ipynb)
-- `notebooks/05_kaggle_full_workflow.ipynb`
+- [notebooks/07_kaggle_github_bootstrap_medium_run.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/07_kaggle_github_bootstrap_medium_run.ipynb)
+- [notebooks/05_kaggle_full_workflow.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/05_kaggle_full_workflow.ipynb)
+- [notebooks/06_kaggle_medium_smoke_test.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/06_kaggle_medium_smoke_test.ipynb)
 
 Run the later-stage bounded experiment:
 

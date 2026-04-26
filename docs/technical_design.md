@@ -29,7 +29,7 @@ This document translates the proposal into an implementation-oriented plan with 
 - `src/masi/alignment/`: Phase 1 behavior-aware contrastive alignment
 - `src/masi/tokenization/`: Phase 2 dual RQ-VAE modules
 - `src/masi/recommender/`: Phase 3 recommender-side pretraining and fine-tuning
-- `scripts/train_masi.py`: one-click launcher that resolves configs, storage, checkpoints, and stage execution
+- `scripts/train_masi.py`: bounded-run launcher that resolves prepared subset inputs, storage, checkpoints, and stage execution
 
 ## Phase Mapping
 
@@ -116,11 +116,15 @@ Current implementation artifacts:
 - `scripts/run_masi_experiment.py`
 - `scripts/train_masi.py`
 - `scripts/download_amazon_csj_dataset.py`
+- `scripts/prepare_amazon_csj_subset.py`
+- `scripts/download_amazon_csj_subset_images.py`
 - `configs/recommender_demo.json`
 - `configs/recommender_amazon_csj_demo.json`
 - `configs/masi_experiment_amazon_csj_demo.json`
 - `configs/masi_train_csj_full.json`
 - `configs/masi_train_csj_smoke.json`
+- `configs/masi_train_csj_subset_medium.json`
+- `configs/masi_train_csj_subset_large.json`
 
 Implemented foundation:
 
@@ -169,3 +173,9 @@ There is a second temporary deviation forced by local resource and ingestion con
 - What changed: the smoke path can still fall back to review-side multimodal fields when the full metadata file is unavailable locally.
 - Why it changed: the local development workspace does not always keep the full metadata file alongside the bounded review prefix.
 - Relaxed assumption: the proposal-aligned full-CSJ launcher prefers the local metadata file, but the smoke path remains allowed to run on review-side text/image records so stage integration can still be regression-tested in low-storage environments.
+
+There is a third intentional deviation in the current bounded training contract:
+
+- What changed: the repository now treats prepared sliced CSJ datasets as the canonical training input for Kaggle and other bounded runs.
+- Why it changed: re-downloading raw reviews, raw metadata, and product images inside ephemeral Kaggle sessions was the dominant operational bottleneck and reduced reproducibility.
+- Relaxed assumption: the raw full-CSJ path remains a deferred reference target, while the actively maintained workflow optimizes for deterministic subset preparation, uploaded prepared datasets, and image reuse from read-only inputs.

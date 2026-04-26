@@ -56,7 +56,7 @@ def _load_config(config_path: str) -> tuple[dict[str, object], Path]:
     """Load a JSON config and resolve the repository root."""
 
     loaded = load_json_config(config_path)
-    repo_root = find_repo_root(loaded.path)
+    repo_root = find_repo_root(Path(__file__))
     return loaded.data, repo_root
 
 

@@ -44,6 +44,7 @@ class ImageDownloadResult:
     image_paths_by_item: dict[str, Path]
     downloaded_item_ids: list[str]
     skipped_existing_item_ids: list[str]
+    reused_preloaded_item_ids: list[str]
     failed_item_ids: list[str]
     missing_url_item_ids: list[str]
 
@@ -242,6 +243,46 @@ def _validate_image(path: Path) -> bool:
     return True
 
 
+def _candidate_image_paths(directory: Path, item_id: str) -> list[Path]:
+    """Enumerate supported on-disk file names for one item image."""
+
+    return [
+        directory / f"{item_id}.jpg",
+        directory / f"{item_id}.jpeg",
+        directory / f"{item_id}.png",
+        directory / f"{item_id}.webp",
+    ]
+
+
+def resolve_preloaded_image_paths(
+    *,
+    item_ids: set[str],
+    image_roots: list[str | Path] | None,
+) -> dict[str, Path]:
+    """Find already-available valid images across one or more read-only roots."""
+
+    if not image_roots:
+        return {}
+
+    resolved_paths: dict[str, Path] = {}
+    roots = [
+        Path(image_root).expanduser().resolve()
+        for image_root in image_roots
+        if str(image_root).strip()
+    ]
+    for item_id in sorted(item_ids):
+        for root in roots:
+            if not root.is_dir():
+                continue
+            for candidate in _candidate_image_paths(root, item_id):
+                if candidate.is_file() and _validate_image(candidate):
+                    resolved_paths[item_id] = candidate
+                    break
+            if item_id in resolved_paths:
+                break
+    return resolved_paths
+
+
 def _download_single_item_image(
     *,
     item_id: str,
@@ -317,6 +358,8 @@ def download_item_images_with_options(
     retries: int,
     timeout_seconds: int,
     resume: bool,
+    readonly_image_dirs: list[str | Path] | None = None,
+    download_missing: bool = True,
 ) -> ImageDownloadResult:
     """Download one verified product image per item with threaded workers."""
 
@@ -324,10 +367,23 @@ def download_item_images_with_options(
     image_paths: dict[str, Path] = {}
     downloaded_item_ids: list[str] = []
     skipped_existing_item_ids: list[str] = []
+    reused_preloaded_item_ids: list[str] = []
     failed_item_ids: list[str] = []
     missing_url_item_ids: list[str] = []
 
-    items = sorted(metadata_by_item.items())
+    preloaded_paths = resolve_preloaded_image_paths(
+        item_ids=set(metadata_by_item),
+        image_roots=readonly_image_dirs,
+    )
+    for item_id, path in sorted(preloaded_paths.items()):
+        image_paths[item_id] = path
+        reused_preloaded_item_ids.append(item_id)
+
+    items = [
+        (item_id, metadata)
+        for item_id, metadata in sorted(metadata_by_item.items())
+        if item_id not in preloaded_paths
+    ]
     max_workers = max(1, int(workers))
 
     def consume(result: tuple[str, str, Path | None]) -> None:
@@ -346,6 +402,21 @@ def download_item_images_with_options(
             missing_url_item_ids.append(item_id)
             return
         failed_item_ids.append(item_id)
+
+    if not download_missing:
+        for item_id, metadata in items:
+            if select_primary_image_url(metadata):
+                failed_item_ids.append(item_id)
+            else:
+                missing_url_item_ids.append(item_id)
+        return ImageDownloadResult(
+            image_paths_by_item=image_paths,
+            downloaded_item_ids=sorted(downloaded_item_ids),
+            skipped_existing_item_ids=sorted(skipped_existing_item_ids),
+            reused_preloaded_item_ids=sorted(reused_preloaded_item_ids),
+            failed_item_ids=sorted(failed_item_ids),
+            missing_url_item_ids=sorted(missing_url_item_ids),
+        )
 
     if max_workers == 1:
         for item_id, metadata in items:
@@ -380,6 +451,7 @@ def download_item_images_with_options(
         image_paths_by_item=image_paths,
         downloaded_item_ids=sorted(downloaded_item_ids),
         skipped_existing_item_ids=sorted(skipped_existing_item_ids),
+        reused_preloaded_item_ids=sorted(reused_preloaded_item_ids),
         failed_item_ids=sorted(failed_item_ids),
         missing_url_item_ids=sorted(missing_url_item_ids),
     )

@@ -1,0 +1,92 @@
+{
+  "seed": 7,
+  "runtime": {
+    "run_name": "amazon_csj_subset_large_train",
+    "resume_if_artifacts_exist": true,
+    "download_reviews_if_missing": false,
+    "download_metadata_if_missing": false,
+    "full_reviews": false
+  },
+  "dataset": {
+    "reviews_path": "data/raw/amazon_reviews_2023/Clothing_Shoes_and_Jewelry.jsonl",
+    "metadata_path": "data/raw/amazon_reviews_2023/meta_Clothing_Shoes_and_Jewelry.jsonl",
+    "kaggle_input_slugs": ["masi-amazon-csj-subset-large"],
+    "reviews_relpath": "Clothing_Shoes_and_Jewelry.jsonl",
+    "metadata_relpath": "meta_Clothing_Shoes_and_Jewelry.jsonl",
+    "min_user_interactions": 5,
+    "min_item_interactions": 5,
+    "max_users": 512,
+    "max_items": 1024,
+    "max_review_records": 400000,
+    "collapse_consecutive_duplicates": false
+  },
+  "assets": {
+    "image_cache_dir": "data/processed/amazon_csj_subset_large/images",
+    "metadata_cache_path": "data/processed/amazon_csj_subset_large/metadata.slice.jsonl",
+    "preloaded_images_relpath": "images",
+    "download_missing_images": true,
+    "use_remote_metadata": false,
+    "image_download_workers": 8,
+    "image_download_retries": 2,
+    "image_download_timeout_seconds": 30,
+    "image_download_resume": true
+  },
+  "clip": {
+    "model_name": "openai/clip-vit-base-patch32",
+    "batch_size": 16
+  },
+  "alignment": {
+    "projection_dim": 192,
+    "epochs": 2,
+    "batch_size": 128,
+    "learning_rate": 0.001,
+    "temperature": 0.07,
+    "hard_negative_count": 8,
+    "window_size": 2,
+    "dropout": 0.1
+  },
+  "tokenization": {
+    "latent_dim": 192,
+    "depth": 3,
+    "codebook_size": 128,
+    "epochs": 8,
+    "batch_size": 128,
+    "learning_rate": 0.0008,
+    "commitment_weight": 0.25,
+    "refit_codebooks_with_residual_kmeans": true
+  },
+  "experiment": {
+    "history_max_tokens": 128,
+    "target_max_tokens": null,
+    "mlm_max_tokens": null,
+    "batch_size": 16,
+    "learning_rate": 0.0008,
+    "hidden_dim": 128,
+    "num_heads": 4,
+    "num_layers": 3,
+    "dropout": 0.1,
+    "mlm_epochs": 2,
+    "autoregressive_epochs": 3,
+    "top_k": 10,
+    "cold_start_ratio": 0.2,
+    "min_train_history": 1,
+    "min_sequence_items": 2
+  },
+  "checkpointing": {
+    "alignment_save_steps": 25,
+    "text_rqvae_save_steps": 25,
+    "vision_rqvae_save_steps": 25,
+    "mlm_save_steps": 25,
+    "autoregressive_save_steps": 25,
+    "keep_last": 3
+  },
+  "method_toggles": {
+    "use_behavior_alignment": true,
+    "use_text_modality": true,
+    "use_visual_modality": true,
+    "use_late_fusion": true,
+    "use_cross_modal_mlm": true,
+    "use_generative_finetuning": true,
+    "use_cold_start_evaluation": true
+  }
+}

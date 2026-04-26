@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Run the full MASI CSJ pipeline from one entrypoint.
+"""Run the bounded MASI CSJ pipeline from one entrypoint.
 
-This launcher is intended for the proposal's primary experiment setting:
+The canonical workflow now assumes a prepared sliced CSJ dataset with:
 
-1. Amazon Reviews 2023 Clothing/Shoes/Jewelry with iterative 5-core filtering,
-2. frozen CLIP feature extraction,
-3. Phase 1 behavior-aware alignment,
-4. Phase 2 independent text/vision quantization with late fusion,
-5. Phase 3 cross-modal MLM pretraining, sequential fine-tuning, and evaluation.
+1. bounded review records,
+2. bounded metadata records,
+3. optional preloaded item images.
 
-The script writes resolved stage configs, executes the phase scripts in order,
-and stores a top-level run manifest so the same config can be used on Kaggle,
-Colab, or a local lab machine.
+The script still keeps the raw CSJ download path available as an explicit
+fallback for local preparation workflows, but prepared subsets are now the
+default training contract for Kaggle and other bounded runs.
 """
 
 from __future__ import annotations
@@ -25,7 +23,13 @@ import sys
 
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
-from masi.common.runtime import detect_runtime_environment, resolve_path, resolve_storage_root
+from masi.common.runtime import (
+    detect_runtime_environment,
+    find_kaggle_dataset_root,
+    resolve_input_path,
+    resolve_path,
+    resolve_storage_root,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
-        default="configs/masi_train_csj_full.json",
+        default="configs/masi_train_csj_subset_large.json",
         help="Path to the one-click training config.",
     )
     parser.add_argument(
@@ -66,14 +70,15 @@ def _run_python_script(
     subprocess.run(command, check=True, cwd=repo_root, env=env)
 
 
-def _ensure_raw_dataset(
+def _ensure_dataset_inputs(
     *,
     repo_root: Path,
     config: dict[str, object],
     reviews_path: Path,
     metadata_path: Path,
+    dataset_root: Path | None,
 ) -> dict[str, object]:
-    """Download the raw CSJ files when the config requests it."""
+    """Ensure the configured dataset inputs exist, optionally downloading raw files."""
 
     runtime_config = dict(config.get("runtime", {}))
     raw_dir = ensure_directory(reviews_path.parent)
@@ -112,12 +117,12 @@ def _ensure_raw_dataset(
     if not reviews_path.exists():
         raise FileNotFoundError(
             f"Missing reviews file at {reviews_path}. "
-            "Attach the configured raw dataset input or update `dataset.reviews_path`."
+            "Attach the configured prepared subset dataset or update `dataset.reviews_path`."
         )
     if not metadata_path.exists():
         raise FileNotFoundError(
             f"Missing metadata file at {metadata_path}. "
-            "Attach the configured raw dataset input or update `dataset.metadata_path`."
+            "Attach the configured prepared subset dataset or update `dataset.metadata_path`."
         )
 
     return {
@@ -125,6 +130,7 @@ def _ensure_raw_dataset(
         "downloaded_metadata": downloaded_metadata,
         "reviews_path": str(reviews_path.resolve()),
         "metadata_path": str(metadata_path.resolve()),
+        "dataset_root": str(dataset_root.resolve()) if dataset_root is not None else None,
     }
 
 
@@ -134,7 +140,7 @@ def main() -> None:
     args = parse_args()
     loaded = load_json_config(args.config)
     config = loaded.data
-    repo_root = find_repo_root(loaded.path)
+    repo_root = find_repo_root(Path(__file__))
     runtime_config = dict(config.get("runtime", {}))
     environment = detect_runtime_environment()
     storage_root = resolve_storage_root(
@@ -151,16 +157,40 @@ def main() -> None:
     resolved_config_root = ensure_directory(run_root / "resolved_configs")
     checkpoint_root = ensure_directory(run_root / "checkpoints")
 
-    reviews_path = resolve_path(storage_root, str(dataset_config["reviews_path"]))
-    metadata_path = resolve_path(storage_root, str(dataset_config["metadata_path"]))
+    dataset_root = find_kaggle_dataset_root(
+        dataset_slugs=dataset_config.get("kaggle_input_slugs"),
+        required_relative_paths=[
+            dataset_config.get("reviews_relpath") or dataset_config.get("reviews_path"),
+            dataset_config.get("metadata_relpath") or dataset_config.get("metadata_path"),
+        ],
+    )
+    reviews_path = resolve_input_path(
+        repo_root=repo_root,
+        storage_root=storage_root,
+        configured_path=str(dataset_config.get("reviews_path", "")),
+        kaggle_dataset_root=dataset_root,
+        relative_path=str(dataset_config.get("reviews_relpath", "")).strip() or None,
+    )
+    metadata_path = resolve_input_path(
+        repo_root=repo_root,
+        storage_root=storage_root,
+        configured_path=str(dataset_config.get("metadata_path", "")),
+        kaggle_dataset_root=dataset_root,
+        relative_path=str(dataset_config.get("metadata_relpath", "")).strip() or None,
+    )
     assert reviews_path is not None
     assert metadata_path is not None
 
-    data_setup = _ensure_raw_dataset(
+    resolved_dataset_root = dataset_root
+    if resolved_dataset_root is None and reviews_path.exists() and metadata_path.exists() and reviews_path.parent == metadata_path.parent:
+        resolved_dataset_root = reviews_path.parent
+
+    data_setup = _ensure_dataset_inputs(
         repo_root=repo_root,
         config=config,
         reviews_path=reviews_path,
         metadata_path=metadata_path,
+        dataset_root=resolved_dataset_root,
     )
 
     token_outputs_root = ensure_directory(run_root / "phase12_tokens")
@@ -175,6 +205,17 @@ def main() -> None:
     )
     assert image_cache_dir is not None
     assert metadata_cache_path is not None
+
+    preloaded_image_dir = resolve_input_path(
+        repo_root=repo_root,
+        storage_root=storage_root,
+        configured_path=str(assets_config.get("preloaded_images_path", "")).strip() or None,
+        kaggle_dataset_root=resolved_dataset_root,
+        relative_path=str(assets_config.get("preloaded_images_relpath", "")).strip() or None,
+    )
+    preloaded_image_dirs = [
+        str(preloaded_image_dir.resolve())
+    ] if preloaded_image_dir is not None and preloaded_image_dir.exists() else []
 
     token_config = {
         "seed": int(config["seed"]),
@@ -192,6 +233,8 @@ def main() -> None:
             "use_remote_metadata": bool(assets_config.get("use_remote_metadata", False)),
             "metadata_cache_path": str(metadata_cache_path.resolve()),
             "image_cache_dir": str(image_cache_dir.resolve()),
+            "preloaded_image_dirs": preloaded_image_dirs,
+            "download_missing_images": bool(assets_config.get("download_missing_images", True)),
             "image_download_workers": int(assets_config.get("image_download_workers", 1)),
             "image_download_retries": int(assets_config.get("image_download_retries", 0)),
             "image_download_timeout_seconds": int(assets_config.get("image_download_timeout_seconds", 30)),
@@ -267,6 +310,8 @@ def main() -> None:
             "experiment": str(experiment_config_path.resolve()),
         },
         "data_setup": data_setup,
+        "resolved_dataset_root": str(resolved_dataset_root.resolve()) if resolved_dataset_root is not None else None,
+        "preloaded_image_dirs": preloaded_image_dirs,
         "token_summary_path": str(token_summary_path.resolve()),
         "experiment_summary_path": str(experiment_summary_path.resolve()),
         "token_summary": token_summary,

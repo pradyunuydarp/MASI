@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Download the Amazon Reviews 2023 Clothing/Shoes/Jewelry raw files.
+"""Download the Amazon Reviews 2023 Clothing/Shoes/Jewelry raw files locally.
 
 The proposal targets the Amazon Reviews 2023 Clothing/Shoes/Jewelry subset.
 The raw review file is very large, so this script defaults to downloading a
 bounded prefix suitable for local development on machines with limited free
 disk. Pass `--full-reviews` only if you have enough space for the complete raw
-review file.
+review file. This script now serves the local subset-preparation workflow; the
+bounded training path prefers already-prepared subset datasets.
 """
 
 from __future__ import annotations
