@@ -17,7 +17,7 @@
     "min_item_interactions": 5,
     "max_users": 102400,
     "max_items": 204800,
-    "max_review_records": 60000000,
+    "max_review_records": 20000000,
     "collapse_consecutive_duplicates": false
   },
   "assets": {

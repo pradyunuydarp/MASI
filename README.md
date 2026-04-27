@@ -111,7 +111,7 @@ Recommended bounded progression:
 - `smoke`: fastest integration check, may skip alignment and fine-tuning if too few multimodal items survive
 - `subset_medium`: faster bounded iteration target for Kaggle and local regression checks
 - `subset_large`: canonical bounded training target sized for a single Kaggle session with resume support available
-- `full_dataset`: 400x the medium subset limits, prepared under `data/full_dataset` with subset JSONL files and `images/`
+- `full_dataset`: larger disk-backed subset target, prepared under `data/full_dataset` with subset JSONL files and `images/`
 - `medium_colab`: older bounded Colab path retained for comparison and non-Kaggle experimentation
 
 Verified launcher artifact:
@@ -397,7 +397,7 @@ PYTHONPATH=src python scripts/prepare_amazon_csj_subset.py \
   --preset medium
 ```
 
-Prepare the `full_dataset` local subset. This preset is 400x the medium limits: 60,000,000 scanned review records, 102,400 users, and 204,800 items. It writes the subset files directly under `data/full_dataset`:
+Prepare the `full_dataset` local subset. This preset scans up to 20,000,000 review records with caps of 102,400 users and 204,800 items. It uses a disk-backed SQLite selection index to avoid loading the raw review dump into RAM, and writes the subset files directly under `data/full_dataset`:
 
 ```bash
 PYTHONPATH=src python scripts/prepare_amazon_csj_subset.py \
@@ -406,6 +406,8 @@ PYTHONPATH=src python scripts/prepare_amazon_csj_subset.py \
   --output-dir data/full_dataset \
   --preset full_dataset
 ```
+
+The full preparation path also writes `data/full_dataset/subset_selection.sqlite3` for selection lineage and debugging. The dataset folder is ignored by git.
 
 Download validated subset images locally into the prepared dataset:
 
