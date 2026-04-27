@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
 from masi.common.io import ensure_directory, write_json
 from masi.data.amazon_csj_assets import download_item_images_with_options
@@ -47,6 +48,33 @@ def main() -> None:
         if item_id and item_id not in metadata_by_item:
             metadata_by_item[item_id] = record
 
+    print(
+        "Downloading subset images: "
+        f"{len(metadata_by_item)} items, workers={int(args.workers)}, "
+        f"retries={int(args.retries)}, resume={bool(args.resume)}",
+        flush=True,
+    )
+    last_reported = {"completed": 0}
+
+    def report_progress(event: dict[str, object]) -> None:
+        completed = int(event["completed"])
+        total = int(event["total"])
+        should_report = completed == total or completed == 1 or completed - int(last_reported["completed"]) >= 10
+        if not should_report:
+            return
+        last_reported["completed"] = completed
+        print(
+            "\r"
+            f"images {completed}/{total} "
+            f"downloaded={event['downloaded']} "
+            f"existing={event['skipped_existing']} "
+            f"failed={event['failed']} "
+            f"missing_url={event['missing_url']}",
+            end="\n" if completed == total else "",
+            file=sys.stderr,
+            flush=True,
+        )
+
     download_result = download_item_images_with_options(
         metadata_by_item=metadata_by_item,
         image_cache_dir=image_output_dir,
@@ -54,7 +82,9 @@ def main() -> None:
         retries=int(args.retries),
         timeout_seconds=int(args.timeout_seconds),
         resume=bool(args.resume),
+        progress_callback=report_progress,
     )
+    print("", file=sys.stderr, flush=True)
 
     manifest = {
         "source_metadata_path": str(metadata_path.resolve()),

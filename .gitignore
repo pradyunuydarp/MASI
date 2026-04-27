@@ -4,6 +4,8 @@ __pycache__/
 
 # MASI local data and generated artifacts
 data/raw/amazon_reviews_2023/
+data/full_dataset/
+data/prepared/
 data/processed/
 outputs/
 docs/*.pdf

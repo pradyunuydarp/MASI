@@ -23,6 +23,11 @@ PRESET_LIMITS = {
         "max_users": 256,
         "max_items": 512,
     },
+    "full_dataset": {
+        "max_review_records": 60000000,
+        "max_users": 102400,
+        "max_items": 204800,
+    },
     "large": {
         "max_review_records": 400000,
         "max_users": 512,

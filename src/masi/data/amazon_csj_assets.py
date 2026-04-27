@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import json
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 from PIL import Image, UnidentifiedImageError
 
@@ -26,6 +27,7 @@ METADATA_URL = (
 
 
 JsonRecord = dict[str, object]
+ImageProgressCallback = Callable[[dict[str, object]], None]
 
 
 @dataclass(slots=True)
@@ -360,6 +362,7 @@ def download_item_images_with_options(
     resume: bool,
     readonly_image_dirs: list[str | Path] | None = None,
     download_missing: bool = True,
+    progress_callback: ImageProgressCallback | None = None,
 ) -> ImageDownloadResult:
     """Download one verified product image per item with threaded workers."""
 
@@ -370,6 +373,33 @@ def download_item_images_with_options(
     reused_preloaded_item_ids: list[str] = []
     failed_item_ids: list[str] = []
     missing_url_item_ids: list[str] = []
+    total_items = len(metadata_by_item)
+
+    def emit_progress(status: str, item_id: str | None = None) -> None:
+        """Emit a compact progress event for CLI callers."""
+
+        if progress_callback is None:
+            return
+        completed = (
+            len(downloaded_item_ids)
+            + len(skipped_existing_item_ids)
+            + len(reused_preloaded_item_ids)
+            + len(failed_item_ids)
+            + len(missing_url_item_ids)
+        )
+        progress_callback(
+            {
+                "status": status,
+                "item_id": item_id,
+                "completed": completed,
+                "total": total_items,
+                "downloaded": len(downloaded_item_ids),
+                "skipped_existing": len(skipped_existing_item_ids),
+                "reused_preloaded": len(reused_preloaded_item_ids),
+                "failed": len(failed_item_ids),
+                "missing_url": len(missing_url_item_ids),
+            }
+        )
 
     preloaded_paths = resolve_preloaded_image_paths(
         item_ids=set(metadata_by_item),
@@ -378,6 +408,7 @@ def download_item_images_with_options(
     for item_id, path in sorted(preloaded_paths.items()):
         image_paths[item_id] = path
         reused_preloaded_item_ids.append(item_id)
+        emit_progress("reused_preloaded", item_id)
 
     items = [
         (item_id, metadata)
@@ -392,23 +423,29 @@ def download_item_images_with_options(
             assert path is not None
             image_paths[item_id] = path
             downloaded_item_ids.append(item_id)
+            emit_progress(status, item_id)
             return
         if status == "skipped_existing":
             assert path is not None
             image_paths[item_id] = path
             skipped_existing_item_ids.append(item_id)
+            emit_progress(status, item_id)
             return
         if status == "missing_url":
             missing_url_item_ids.append(item_id)
+            emit_progress(status, item_id)
             return
         failed_item_ids.append(item_id)
+        emit_progress(status, item_id)
 
     if not download_missing:
         for item_id, metadata in items:
             if select_primary_image_url(metadata):
                 failed_item_ids.append(item_id)
+                emit_progress("download_disabled", item_id)
             else:
                 missing_url_item_ids.append(item_id)
+                emit_progress("missing_url", item_id)
         return ImageDownloadResult(
             image_paths_by_item=image_paths,
             downloaded_item_ids=sorted(downloaded_item_ids),

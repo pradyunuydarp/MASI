@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
+import sys
 
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
@@ -171,6 +173,34 @@ def main() -> None:
     )
     resume = bool(args.resume or assets_config.get("image_download_resume", True))
 
+    print(
+        "Downloading configured images: "
+        f"{len(modality_records)} items, workers={workers}, retries={retries}, "
+        f"resume={resume}, preloaded_dirs={len(preloaded_image_dirs)}",
+        flush=True,
+    )
+    last_reported = {"completed": 0}
+
+    def report_progress(event: dict[str, object]) -> None:
+        completed = int(event["completed"])
+        total = int(event["total"])
+        should_report = completed == total or completed == 1 or completed - int(last_reported["completed"]) >= 10
+        if not should_report:
+            return
+        last_reported["completed"] = completed
+        print(
+            "\r"
+            f"images {completed}/{total} "
+            f"downloaded={event['downloaded']} "
+            f"existing={event['skipped_existing']} "
+            f"preloaded={event['reused_preloaded']} "
+            f"failed={event['failed']} "
+            f"missing_url={event['missing_url']}",
+            end="\n" if completed == total else "",
+            file=sys.stderr,
+            flush=True,
+        )
+
     download_result = download_item_images_with_options(
         metadata_by_item=modality_records,
         image_cache_dir=image_cache_dir,
@@ -180,7 +210,9 @@ def main() -> None:
         resume=resume,
         readonly_image_dirs=preloaded_image_dirs,
         download_missing=bool(assets_config.get("download_missing_images", True)),
+        progress_callback=report_progress,
     )
+    print("", file=sys.stderr, flush=True)
 
     run_name = str(runtime_config.get("run_name", "masi_train_csj"))
     run_root = ensure_directory(storage_root / "outputs" / run_name)

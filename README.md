@@ -85,6 +85,7 @@ Main artifacts:
 - [scripts/download_amazon_csj_images.py](/Users/pradyundevarakonda/Developer/MASI/scripts/download_amazon_csj_images.py)
 - [configs/masi_train_csj_subset_medium.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_medium.json)
 - [configs/masi_train_csj_subset_large.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_large.json)
+- [configs/Full_dataset.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/Full_dataset.json)
 - [configs/masi_train_csj_smoke.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_smoke.json)
 - [configs/masi_train_csj_medium_colab.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_medium_colab.json)
 
@@ -110,6 +111,7 @@ Recommended bounded progression:
 - `smoke`: fastest integration check, may skip alignment and fine-tuning if too few multimodal items survive
 - `subset_medium`: faster bounded iteration target for Kaggle and local regression checks
 - `subset_large`: canonical bounded training target sized for a single Kaggle session with resume support available
+- `full_dataset`: 400x the medium subset limits, prepared under `data/full_dataset` with subset JSONL files and `images/`
 - `medium_colab`: older bounded Colab path retained for comparison and non-Kaggle experimentation
 
 Verified launcher artifact:
@@ -395,6 +397,16 @@ PYTHONPATH=src python scripts/prepare_amazon_csj_subset.py \
   --preset medium
 ```
 
+Prepare the `full_dataset` local subset. This preset is 400x the medium limits: 60,000,000 scanned review records, 102,400 users, and 204,800 items. It writes the subset files directly under `data/full_dataset`:
+
+```bash
+PYTHONPATH=src python scripts/prepare_amazon_csj_subset.py \
+  --reviews-path data/raw/amazon_reviews_2023/Clothing_Shoes_and_Jewelry.jsonl \
+  --metadata-path data/raw/amazon_reviews_2023/meta_Clothing_Shoes_and_Jewelry.jsonl \
+  --output-dir data/full_dataset \
+  --preset full_dataset
+```
+
 Download validated subset images locally into the prepared dataset:
 
 ```bash
@@ -404,6 +416,25 @@ PYTHONPATH=src python scripts/download_amazon_csj_subset_images.py \
   --workers 8 \
   --retries 2 \
   --resume
+```
+
+Download validated images for `data/full_dataset/images`:
+
+```bash
+PYTHONPATH=src python scripts/download_amazon_csj_subset_images.py \
+  --metadata-path data/full_dataset/meta_Clothing_Shoes_and_Jewelry.jsonl \
+  --output-dir data/full_dataset \
+  --workers 16 \
+  --retries 2 \
+  --resume
+```
+
+Run MASI training against the prepared `full_dataset` config:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/train_masi.py \
+  --config configs/Full_dataset.json \
+  --storage-root .
 ```
 
 Run the subset-medium config on Kaggle after attaching the prepared subset dataset `masi-amazon-csj-subset-medium`:
