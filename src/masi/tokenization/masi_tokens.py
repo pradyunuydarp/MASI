@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -86,8 +87,14 @@ def encode_clip_embeddings(
     if not use_text_modality and not use_visual_modality:
         raise ValueError("At least one modality must be enabled for CLIP encoding.")
 
-    model = CLIPModel.from_pretrained(model_name).to(device)
-    processor = CLIPProcessor.from_pretrained(model_name)
+    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
+    model = CLIPModel.from_pretrained(
+        model_name,
+        token=hf_token,
+        low_cpu_mem_usage=False,
+        use_safetensors=True,
+    ).to(device)
+    processor = CLIPProcessor.from_pretrained(model_name, token=hf_token)
     model.eval()
 
     valid_item_ids = [
