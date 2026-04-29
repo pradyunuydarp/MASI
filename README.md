@@ -51,6 +51,7 @@ These baselines define the evaluation bar for cold-start hit rate, coverage, and
 - [TODO_TASKS.md](/Users/pradyundevarakonda/Developer/MASI/TODO_TASKS.md): living project tracker maintained by AI agents
 - [Multimodal_Augmented_Semantic_Identifiers_for_Cold_Start_Discovery_in_Generative_Recommendation__Research_Proposal.pdf](/Users/pradyundevarakonda/Developer/MASI/Multimodal_Augmented_Semantic_Identifiers_for_Cold_Start_Discovery_in_Generative_Recommendation__Research_Proposal.pdf): source proposal
 - [docs/technical_design.md](/Users/pradyundevarakonda/Developer/MASI/docs/technical_design.md): proposal-to-code translation with module boundaries and artifact contracts
+- [docs/training_process.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/training_process.md): implemented training-process explanation for CLIP, Phase 1 alignment, RQ-VAE tokenization, and Phase 3 Transformer training
 - [docs/reference_repos.md](/Users/pradyundevarakonda/Developer/MASI/docs/reference_repos.md): working map of foundational papers and public repositories relevant to MASI
 - [docs/masi_implementation_note.tex](/Users/pradyundevarakonda/Developer/MASI/docs/masi_implementation_note.tex): LaTeX implementation note covering completed work, rationale, and engineering challenges
 
@@ -136,7 +137,7 @@ Recommended Kaggle Dataset names:
 What the Kaggle path does:
 
 - discovers the prepared subset dataset by slug across Kaggle's direct and nested dataset mount layouts,
-- bootstraps a fresh writable repo checkout from `https://github.com/pradyunuydarp/MASI.git` into `/kaggle/working/MASI`,
+- bootstraps a fresh writable repo checkout from `https://github.com/pradyunuydarp/MASI.git` into `/kaggle/working/MASI`; rerun-safe notebooks change back to `/kaggle/working` before replacing that checkout,
 - validates preloaded images from the attached dataset and downloads only missing ones into `/kaggle/working/masi_artifacts/data/processed/...`,
 - runs the same `train_masi.py` launcher against the prepared subset config,
 - packages the resulting manifests, checkpoints, and any writable-cache artifacts into one zip bundle that can be reattached to resume a later session.
@@ -307,7 +308,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e ".[recommender]"
 ```
 
-The `recommender` extra now includes the packages required by the one-click launcher and the Phase 1/2 token builder, including `torch`, `transformers`, and `Pillow`.
+The `recommender` extra now includes the packages required by the one-click launcher and the Phase 1/2 token builder, including `torch`, `transformers`, `Pillow`, and a Kaggle-compatible NumPy range `>=1.26,<2.1`.
 
 If you want to open the notebooks locally, install Jupyter inside that environment:
 
@@ -439,6 +440,10 @@ PYTHONPATH=src .venv/bin/python scripts/train_masi.py \
   --storage-root .
 ```
 
+Notebook equivalent:
+
+- [notebooks/08_full_dataset_pipeline.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/08_full_dataset_pipeline.ipynb): clones MASI from GitHub into `/kaggle/working/MASI` on Kaggle with a rerun-safe bootstrap, validates the prepared dataset at `/kaggle/input/datasets/dheerajrajanala/masi-amazon-csj-full-dataset`, runs training, inspects outputs, and exports the run artifacts.
+
 Run the subset-medium config on Kaggle after attaching the prepared subset dataset `masi-amazon-csj-subset-medium`:
 
 ```bash
@@ -480,6 +485,7 @@ Open the demo notebook:
 - [notebooks/03_colab_smoke_test.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/03_colab_smoke_test.ipynb)
 - [notebooks/04_colab_smoke_test_fresh_clone.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/04_colab_smoke_test_fresh_clone.ipynb)
 - [notebooks/07_kaggle_github_bootstrap_medium_run.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/07_kaggle_github_bootstrap_medium_run.ipynb)
+- [notebooks/08_full_dataset_pipeline.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/08_full_dataset_pipeline.ipynb)
 - [notebooks/05_kaggle_full_workflow.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/05_kaggle_full_workflow.ipynb)
 - [notebooks/06_kaggle_medium_smoke_test.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/06_kaggle_medium_smoke_test.ipynb)
 
