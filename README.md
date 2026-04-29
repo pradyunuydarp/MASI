@@ -138,6 +138,7 @@ What the Kaggle path does:
 
 - discovers the prepared subset dataset by slug across Kaggle's direct and nested dataset mount layouts,
 - bootstraps a fresh writable repo checkout from `https://github.com/pradyunuydarp/MASI.git` into `/kaggle/working/MASI`; rerun-safe notebooks change back to `/kaggle/working` before replacing that checkout,
+- loads an optional Kaggle secret named `HF_TOKEN`, stores Hugging Face assets under `/kaggle/working/masi_artifacts/hf_cache`, disables Xet transfers, and preloads CLIP before the long training command,
 - validates preloaded images from the attached dataset and downloads only missing ones into `/kaggle/working/masi_artifacts/data/processed/...`,
 - runs the same `train_masi.py` launcher against the prepared subset config,
 - packages the resulting manifests, checkpoints, and any writable-cache artifacts into one zip bundle that can be reattached to resume a later session.
