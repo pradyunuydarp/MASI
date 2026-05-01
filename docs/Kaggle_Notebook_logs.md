@@ -19,7 +19,12 @@ This log captures operational lessons from getting `notebooks/08_full_dataset_pi
 
 The notebook intentionally runs a bounded slice from the prepared full dataset on Kaggle. The current implementation keeps CLIP embeddings in memory, so the proposal-scale `Full_dataset.json` caps are too large for one Kaggle session.
 
-Current Kaggle-safe caps:
+Current Kaggle-safe profile support:
+
+- `smoke_safe`: preserves the previously validated bounded run used by the saved Kaggle output notebook.
+- `scaled_safe`: the next recommended metric-improvement profile, still bounded because CLIP embeddings are kept in memory.
+
+Previously observed `smoke_safe` caps:
 
 - `max_users = 512`
 - `max_items = 1024`
@@ -33,7 +38,27 @@ Current Kaggle-safe caps:
 - `experiment.mlm_epochs = 1`
 - `experiment.autoregressive_epochs = 2`
 
+Current recommended `scaled_safe` caps:
+
+- `max_users = 4096`
+- `max_items = 8192`
+- `max_review_records = 20_000_000`
+- `clip.batch_size = 16`
+- `alignment.batch_size = 256`
+- `alignment.epochs = 5`
+- `tokenization.batch_size = 256`
+- `tokenization.epochs = 15`
+- `experiment.batch_size = 32`
+- `experiment.history_max_tokens = 128`
+- `experiment.mlm_epochs = 5`
+- `experiment.autoregressive_epochs = 15`
+- `experiment.hidden_dim = 256`
+- `experiment.num_heads = 8`
+- `experiment.num_layers = 4`
+
 Set `USE_KAGGLE_SAFE_LIMITS = False` only on a larger machine or after adding sharded CLIP embedding persistence.
+
+The saved output notebook `Kaggle_interactions/masi-full-dataset.ipynb` produced warm `HR@10 = 0.04248` and cold `HR@10 = 0.0` under the smoke-scale profile. See `docs/kaggle_full_dataset_scaleup_journey.md` for the interpretation and the next scale-up plan.
 
 ## Issues Encountered And Fixes
 

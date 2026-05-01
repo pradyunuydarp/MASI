@@ -53,6 +53,7 @@ These baselines define the evaluation bar for cold-start hit rate, coverage, and
 - [docs/technical_design.md](/Users/pradyundevarakonda/Developer/MASI/docs/technical_design.md): proposal-to-code translation with module boundaries and artifact contracts
 - [docs/training_process.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/training_process.md): implemented training-process explanation for CLIP, Phase 1 alignment, RQ-VAE tokenization, and Phase 3 Transformer training
 - [docs/Kaggle_Notebook_logs.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/Kaggle_Notebook_logs.md): Kaggle notebook run log covering setup fixes, Hugging Face handling, OOM/SIGKILL lessons, and current bounded runtime contract
+- [docs/kaggle_full_dataset_scaleup_journey.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/kaggle_full_dataset_scaleup_journey.md): interpretation of the saved Kaggle output notebook and the next safe scale-up profile for warm/cold metric improvement
 - [docs/reference_repos.md](/Users/pradyundevarakonda/Developer/MASI/docs/reference_repos.md): working map of foundational papers and public repositories relevant to MASI
 - [docs/masi_implementation_note.tex](/Users/pradyundevarakonda/Developer/MASI/docs/masi_implementation_note.tex): LaTeX implementation note covering completed work, rationale, and engineering challenges
 
@@ -140,7 +141,7 @@ What the Kaggle path does:
 - discovers the prepared subset dataset by slug across Kaggle's direct and nested dataset mount layouts,
 - bootstraps a fresh writable repo checkout from `https://github.com/pradyunuydarp/MASI.git` into `/kaggle/working/MASI`; rerun-safe notebooks change back to `/kaggle/working` before replacing that checkout,
 - loads an optional Kaggle secret named `HF_TOKEN`, stores Hugging Face assets under `/kaggle/working/masi_artifacts/hf_cache`, disables Xet transfers, and preloads CLIP before the long training command,
-- derives a bounded Kaggle runtime config from `configs/Full_dataset.json` by default so the prepared full dataset is sampled within single-session memory limits,
+- derives a bounded Kaggle runtime config from `configs/Full_dataset.json` by default so the prepared full dataset is sampled within single-session memory limits; the full-dataset notebook now exposes `smoke_safe` and `scaled_safe` profiles in its first code cell,
 - validates preloaded images from the attached dataset and downloads only missing ones into `/kaggle/working/masi_artifacts/data/processed/...`,
 - runs the same `train_masi.py` launcher against the prepared subset config,
 - packages the resulting manifests, checkpoints, and any writable-cache artifacts into one zip bundle that can be reattached to resume a later session.
