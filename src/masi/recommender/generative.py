@@ -91,7 +91,11 @@ class GenerativeSIDRecommender(nn.Module):
 
         generated = prefix_token_ids.clone()
         for _ in range(max_new_tokens):
-            logits = self.forward(generated)
+            # Long user histories can exceed the fixed positional-embedding
+            # budget used during training. Decode from the most recent context,
+            # matching the left-truncation policy used by ranking/evaluation.
+            model_input = generated[:, -self.max_sequence_length :]
+            logits = self.forward(model_input)
             next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)
             generated = torch.cat([generated, next_token], dim=1)
             if bool((next_token == stop_token_id).all()):
