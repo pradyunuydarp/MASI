@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 from random import Random
 from typing import Callable
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+from masi.common.progress import make_progress_bar
 
 
 @dataclass(slots=True)
@@ -189,7 +192,7 @@ def train_behavior_aware_alignment(
     device: torch.device,
     seed: int,
     use_behavior_alignment: bool = True,
-    checkpoint_callback: Callable[..., None] | None = None,
+    checkpoint_callback: Callable[..., object] | None = None,
 ) -> AlignmentResult:
     """Train the Phase 1 behavior-aware projection heads."""
 
@@ -262,85 +265,94 @@ def train_behavior_aware_alignment(
             model_state_dict=None,
         )
 
-    for epoch_index in range(epochs):
-        shuffled_pairs = list(positive_pairs)
-        rng.shuffle(shuffled_pairs)
+    batches_per_epoch = (len(positive_pairs) + batch_size - 1) // batch_size
+    total_steps = epochs * batches_per_epoch
+    with make_progress_bar(total=total_steps, desc="Phase 1 alignment") as progress:
+        for epoch_index in range(epochs):
+            shuffled_pairs = list(positive_pairs)
+            rng.shuffle(shuffled_pairs)
 
-        for batch_index, start in enumerate(range(0, len(shuffled_pairs), batch_size), start=1):
-            # Each batch is constructed in item-pair space rather than user
-            # space because the proposal's alignment objective operates over
-            # collaborative item-item positives extracted from the graph.
-            batch_pairs = shuffled_pairs[start : start + batch_size]
-            anchors = [pair[0] for pair in batch_pairs]
-            positives = [pair[1] for pair in batch_pairs]
+            for batch_index, start in enumerate(range(0, len(shuffled_pairs), batch_size), start=1):
+                # Each batch is constructed in item-pair space rather than user
+                # space because the proposal's alignment objective operates over
+                # collaborative item-item positives extracted from the graph.
+                batch_pairs = shuffled_pairs[start : start + batch_size]
+                anchors = [pair[0] for pair in batch_pairs]
+                positives = [pair[1] for pair in batch_pairs]
 
-            batch_text_anchor = torch.stack([text_embeddings[item_id] for item_id in anchors]).to(device)
-            batch_text_positive = torch.stack([text_embeddings[item_id] for item_id in positives]).to(device)
-            batch_image_anchor = torch.stack([image_embeddings[item_id] for item_id in anchors]).to(device)
-            batch_image_positive = torch.stack([image_embeddings[item_id] for item_id in positives]).to(device)
+                batch_text_anchor = torch.stack([text_embeddings[item_id] for item_id in anchors]).to(device)
+                batch_text_positive = torch.stack([text_embeddings[item_id] for item_id in positives]).to(device)
+                batch_image_anchor = torch.stack([image_embeddings[item_id] for item_id in anchors]).to(device)
+                batch_image_positive = torch.stack([image_embeddings[item_id] for item_id in positives]).to(device)
 
-            text_negative_sets = []
-            image_negative_sets = []
-            for item_id in anchors:
-                negative_ids = _sample_hard_negatives(
-                    item_id=item_id,
-                    negative_pool=negative_pool,
-                    sample_size=hard_negative_count,
-                    rng=rng,
-                    fallback_items=item_ids,
+                text_negative_sets = []
+                image_negative_sets = []
+                for item_id in anchors:
+                    negative_ids = _sample_hard_negatives(
+                        item_id=item_id,
+                        negative_pool=negative_pool,
+                        sample_size=hard_negative_count,
+                        rng=rng,
+                        fallback_items=item_ids,
+                    )
+                    text_negative_sets.append(torch.stack([text_embeddings[negative_id] for negative_id in negative_ids], dim=0))
+                    image_negative_sets.append(torch.stack([image_embeddings[negative_id] for negative_id in negative_ids], dim=0))
+
+                text_negative_batch = torch.stack(text_negative_sets).to(device)
+                image_negative_batch = torch.stack(image_negative_sets).to(device)
+
+                optimizer.zero_grad()
+
+                # Text and image heads are trained independently on the same
+                # behavioral supervision so that one modality cannot dominate the
+                # representation of the other before quantization.
+                projected_text_anchor = model.text_head(batch_text_anchor)
+                projected_text_positive = model.text_head(batch_text_positive)
+                projected_text_negatives = model.text_head(text_negative_batch.reshape(-1, input_dim)).reshape(
+                    text_negative_batch.size(0), text_negative_batch.size(1), -1
                 )
-                text_negative_sets.append(torch.stack([text_embeddings[negative_id] for negative_id in negative_ids], dim=0))
-                image_negative_sets.append(torch.stack([image_embeddings[negative_id] for negative_id in negative_ids], dim=0))
 
-            text_negative_batch = torch.stack(text_negative_sets).to(device)
-            image_negative_batch = torch.stack(image_negative_sets).to(device)
-
-            optimizer.zero_grad()
-
-            # Text and image heads are trained independently on the same
-            # behavioral supervision so that one modality cannot dominate the
-            # representation of the other before quantization.
-            projected_text_anchor = model.text_head(batch_text_anchor)
-            projected_text_positive = model.text_head(batch_text_positive)
-            projected_text_negatives = model.text_head(text_negative_batch.reshape(-1, input_dim)).reshape(
-                text_negative_batch.size(0), text_negative_batch.size(1), -1
-            )
-
-            projected_image_anchor = model.image_head(batch_image_anchor)
-            projected_image_positive = model.image_head(batch_image_positive)
-            projected_image_negatives = model.image_head(image_negative_batch.reshape(-1, input_dim)).reshape(
-                image_negative_batch.size(0), image_negative_batch.size(1), -1
-            )
-
-            text_loss = _info_nce_loss(
-                anchor_embeddings=projected_text_anchor,
-                positive_embeddings=projected_text_positive,
-                hard_negative_embeddings=projected_text_negatives,
-                temperature=temperature,
-            )
-            image_loss = _info_nce_loss(
-                anchor_embeddings=projected_image_anchor,
-                positive_embeddings=projected_image_positive,
-                hard_negative_embeddings=projected_image_negatives,
-                temperature=temperature,
-            )
-
-            loss = text_loss + image_loss
-            loss.backward()
-            optimizer.step()
-            loss_value = float(loss.detach().cpu().item())
-            loss_history.append(loss_value)
-            global_step += 1
-
-            if checkpoint_callback is not None:
-                checkpoint_callback(
-                    model=model,
-                    optimizer=optimizer,
-                    global_step=global_step,
-                    epoch_index=epoch_index + 1,
-                    step_in_epoch=batch_index,
-                    loss=loss_value,
+                projected_image_anchor = model.image_head(batch_image_anchor)
+                projected_image_positive = model.image_head(batch_image_positive)
+                projected_image_negatives = model.image_head(image_negative_batch.reshape(-1, input_dim)).reshape(
+                    image_negative_batch.size(0), image_negative_batch.size(1), -1
                 )
+
+                text_loss = _info_nce_loss(
+                    anchor_embeddings=projected_text_anchor,
+                    positive_embeddings=projected_text_positive,
+                    hard_negative_embeddings=projected_text_negatives,
+                    temperature=temperature,
+                )
+                image_loss = _info_nce_loss(
+                    anchor_embeddings=projected_image_anchor,
+                    positive_embeddings=projected_image_positive,
+                    hard_negative_embeddings=projected_image_negatives,
+                    temperature=temperature,
+                )
+
+                loss = text_loss + image_loss
+                loss.backward()
+                optimizer.step()
+                loss_value = float(loss.detach().cpu().item())
+                loss_history.append(loss_value)
+                global_step += 1
+
+                checkpoint_path = None
+                if checkpoint_callback is not None:
+                    checkpoint_path = checkpoint_callback(
+                        model=model,
+                        optimizer=optimizer,
+                        global_step=global_step,
+                        epoch_index=epoch_index + 1,
+                        step_in_epoch=batch_index,
+                        loss=loss_value,
+                    )
+                postfix = {"loss": f"{loss_value:.4f}"}
+                if checkpoint_path is not None:
+                    postfix["ckpt"] = Path(str(checkpoint_path)).name
+                progress.set_postfix(postfix)
+                progress.update(1)
 
     with torch.no_grad():
         aligned_text_embeddings = {

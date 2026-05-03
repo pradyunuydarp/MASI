@@ -7,6 +7,7 @@ graduates to a fuller experiment runner.
 
 from __future__ import annotations
 
+from pathlib import Path
 from statistics import mean
 from typing import Callable
 
@@ -14,6 +15,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from masi.common.progress import make_progress_bar
 from masi.recommender.mlm import masked_language_modeling_loss
 
 
@@ -71,39 +73,49 @@ def run_training_epochs(
     label_key: str,
     epochs: int,
     device: torch.device,
-    checkpoint_callback: Callable[..., None] | None = None,
+    checkpoint_callback: Callable[..., object] | None = None,
 ) -> list[float]:
     """Train a model for multiple epochs and return mean epoch losses."""
 
     epoch_losses: list[float] = []
     model.to(device)
     global_step = 0
-    for epoch_index in range(epochs):
-        batch_losses: list[float] = []
-        for batch_index, batch in enumerate(data_loader, start=1):
-            batch_inputs = batch[input_key].to(device)
-            batch_labels = batch[label_key].to(device)
-            loss_value = training_step(
-                model=model,
-                optimizer=optimizer,
-                batch_inputs=batch_inputs,
-                batch_labels=batch_labels,
-                objective=objective,
-                pad_token_id=pad_token_id,
-            )
-            batch_losses.append(loss_value)
-            global_step += 1
-            if checkpoint_callback is not None:
-                checkpoint_callback(
+    steps_per_epoch = len(data_loader) if hasattr(data_loader, "__len__") else 0
+    total_steps = epochs * steps_per_epoch
+    progress_desc = f"Phase 3 {objective}"
+    with make_progress_bar(total=total_steps, desc=progress_desc) as progress:
+        for epoch_index in range(epochs):
+            batch_losses: list[float] = []
+            for batch_index, batch in enumerate(data_loader, start=1):
+                batch_inputs = batch[input_key].to(device)
+                batch_labels = batch[label_key].to(device)
+                loss_value = training_step(
                     model=model,
                     optimizer=optimizer,
+                    batch_inputs=batch_inputs,
+                    batch_labels=batch_labels,
                     objective=objective,
-                    global_step=global_step,
-                    epoch_index=epoch_index + 1,
-                    step_in_epoch=batch_index,
-                    loss=loss_value,
+                    pad_token_id=pad_token_id,
                 )
-        epoch_losses.append(mean(batch_losses) if batch_losses else 0.0)
+                batch_losses.append(loss_value)
+                global_step += 1
+                checkpoint_path = None
+                if checkpoint_callback is not None:
+                    checkpoint_path = checkpoint_callback(
+                        model=model,
+                        optimizer=optimizer,
+                        objective=objective,
+                        global_step=global_step,
+                        epoch_index=epoch_index + 1,
+                        step_in_epoch=batch_index,
+                        loss=loss_value,
+                    )
+                postfix = {"loss": f"{loss_value:.4f}"}
+                if checkpoint_path is not None:
+                    postfix["ckpt"] = Path(str(checkpoint_path)).name
+                progress.set_postfix(postfix)
+                progress.update(1)
+            epoch_losses.append(mean(batch_losses) if batch_losses else 0.0)
     return epoch_losses
 
 

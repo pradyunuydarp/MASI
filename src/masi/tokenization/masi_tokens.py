@@ -10,6 +10,7 @@ import torch
 from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
 
+from masi.common.progress import make_progress_bar
 from masi.recommender.vocabulary import FusedSemanticId
 
 
@@ -72,6 +73,20 @@ def _unwrap_clip_output(output: object) -> torch.Tensor:
     raise TypeError(f"Unsupported CLIP output type: {type(output)}")
 
 
+def _resolve_clip_model_source(model_name: str) -> str:
+    """Prefer a locally attached CLIP directory when one is configured."""
+
+    configured = (
+        os.environ.get("MASI_CLIP_MODEL_DIR")
+        or os.environ.get("MASI_CLIP_MODEL_PATH")
+        or model_name
+    )
+    candidate = Path(configured).expanduser()
+    if candidate.exists():
+        return str(candidate.resolve())
+    return configured
+
+
 def encode_clip_embeddings(
     *,
     metadata_by_item: dict[str, dict[str, object]],
@@ -88,13 +103,14 @@ def encode_clip_embeddings(
         raise ValueError("At least one modality must be enabled for CLIP encoding.")
 
     hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
+    model_source = _resolve_clip_model_source(model_name)
     model = CLIPModel.from_pretrained(
-        model_name,
+        model_source,
         token=hf_token,
         low_cpu_mem_usage=False,
         use_safetensors=True,
     ).to(device)
-    processor = CLIPProcessor.from_pretrained(model_name, token=hf_token)
+    processor = CLIPProcessor.from_pretrained(model_source, token=hf_token)
     model.eval()
 
     valid_item_ids = [
@@ -107,7 +123,12 @@ def encode_clip_embeddings(
     text_embeddings: dict[str, torch.Tensor] = {}
     image_embeddings: dict[str, torch.Tensor] = {}
 
-    with torch.no_grad():
+    total_batches = (len(valid_item_ids) + batch_size - 1) // batch_size
+    with torch.no_grad(), make_progress_bar(
+        total=total_batches,
+        desc="CLIP encode",
+        unit="batch",
+    ) as progress:
         for start in range(0, len(valid_item_ids), batch_size):
             batch_item_ids = valid_item_ids[start : start + batch_size]
             # Text and image batches are built in the same item order so their
@@ -138,6 +159,13 @@ def encode_clip_embeddings(
                     image_embeddings[item_id] = batch_image_embeddings[index]
                 if images:
                     images[index].close()
+            progress.set_postfix(
+                {
+                    "items": min(start + len(batch_item_ids), len(valid_item_ids)),
+                    "total": len(valid_item_ids),
+                }
+            )
+            progress.update(1)
 
     return text_embeddings, image_embeddings
 

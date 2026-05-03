@@ -152,6 +152,8 @@ Fixes added:
   - `TRANSFORMERS_CACHE=/kaggle/working/masi_artifacts/hf_cache/transformers`
 - The notebook disables Xet transfers with `HF_HUB_DISABLE_XET=1`.
 - The notebook preloads CLIP before the long training command so download/load failures happen early.
+- The notebook writes a standalone CLIP directory under `/kaggle/working/masi_artifacts/hf_models/openai_clip-vit-base-patch32` and creates a zip beside it when running on Kaggle.
+- Publish that zip as a private Kaggle Dataset/Model and attach it to later sessions; the notebook auto-detects attached CLIP directories under `/kaggle/input` by looking for `config.json`, `preprocessor_config.json`, and model weights.
 - The CLIP loader is patched to use:
 
 ```python
@@ -160,6 +162,14 @@ use_safetensors=True
 ```
 
 This avoids the higher-risk meta-tensor materialization path in the training subprocess.
+
+### Long Training Output Is Hard To Read
+
+Current behavior:
+
+- The full-dataset notebooks clear stale volatile outputs and run pip installs with quiet flags.
+- CLIP encoding, behavior alignment, text/vision RQ-VAE training, cross-modal MLM, and autoregressive fine-tuning emit bounded tqdm percentage bars rather than a line per step.
+- Kaggle-safe profiles set periodic checkpoint saves to every 25 optimizer steps. Each periodic checkpoint directory has a `latest.json` manifest, and the notebook checkpoint-inspection cell prints the latest retained path for each stage.
 
 ### CLIP Loaded But `build_masi_tokens.py` Was Killed
 

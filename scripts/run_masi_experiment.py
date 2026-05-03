@@ -257,10 +257,10 @@ def main() -> None:
         epoch_index: int,
         step_in_epoch: int,
         loss: float,
-    ) -> None:
+    ) -> Path | None:
         if mlm_checkpoint_manager is None:
-            return
-        mlm_checkpoint_manager.maybe_save(
+            return None
+        return mlm_checkpoint_manager.maybe_save(
             global_step=global_step,
             payload={
                 "config": config,
@@ -317,10 +317,10 @@ def main() -> None:
         epoch_index: int,
         step_in_epoch: int,
         loss: float,
-    ) -> None:
+    ) -> Path | None:
         if generative_checkpoint_manager is None:
-            return
-        generative_checkpoint_manager.maybe_save(
+            return None
+        return generative_checkpoint_manager.maybe_save(
             global_step=global_step,
             payload={
                 "config": config,
@@ -341,6 +341,9 @@ def main() -> None:
     if toggles.use_generative_finetuning and len(train_dataset) > 0:
         generative_optimizer = torch.optim.AdamW(generative_model.parameters(), lr=float(config["learning_rate"]))
         class _AutoregressiveLoader:
+            def __len__(self_nonlocal):
+                return len(train_loader)
+
             def __iter__(self_nonlocal):
                 for batch in train_loader:
                     yield {

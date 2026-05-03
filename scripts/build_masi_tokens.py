@@ -171,10 +171,15 @@ def main() -> None:
     image_paths = image_download_result.image_paths_by_item
 
     device = select_device()
+    clip_model_source = str(
+        clip_config.get("local_model_path")
+        or clip_config.get("model_path")
+        or clip_config["model_name"]
+    )
     text_embeddings, image_embeddings = encode_clip_embeddings(
         metadata_by_item=modality_records,
         image_paths_by_item=image_paths,
-        model_name=str(clip_config["model_name"]),
+        model_name=clip_model_source,
         batch_size=int(clip_config["batch_size"]),
         device=device,
         use_text_modality=toggles.use_text_modality,
@@ -224,10 +229,10 @@ def main() -> None:
         epoch_index: int,
         step_in_epoch: int,
         loss: float,
-    ) -> None:
+    ) -> Path | None:
         if alignment_checkpoint_manager is None:
-            return
-        alignment_checkpoint_manager.maybe_save(
+            return None
+        return alignment_checkpoint_manager.maybe_save(
             global_step=global_step,
             payload={
                 "config": config,
@@ -283,10 +288,10 @@ def main() -> None:
             epoch_index: int,
             step_in_epoch: int,
             loss: float,
-        ) -> None:
+        ) -> Path | None:
             if text_checkpoint_manager is None:
-                return
-            text_checkpoint_manager.maybe_save(
+                return None
+            return text_checkpoint_manager.maybe_save(
                 global_step=global_step,
                 payload={
                     "config": config,
@@ -340,10 +345,10 @@ def main() -> None:
             epoch_index: int,
             step_in_epoch: int,
             loss: float,
-        ) -> None:
+        ) -> Path | None:
             if image_checkpoint_manager is None:
-                return
-            image_checkpoint_manager.maybe_save(
+                return None
+            return image_checkpoint_manager.maybe_save(
                 global_step=global_step,
                 payload={
                     "config": config,

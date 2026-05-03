@@ -141,9 +141,10 @@ What the Kaggle path does:
 - discovers the prepared subset dataset by slug across Kaggle's direct and nested dataset mount layouts,
 - bootstraps a fresh writable repo checkout from `https://github.com/pradyunuydarp/MASI.git` into `/kaggle/working/MASI`; rerun-safe notebooks change back to `/kaggle/working` before replacing that checkout,
 - loads an optional Kaggle secret named `HF_TOKEN`, stores Hugging Face assets under `/kaggle/working/masi_artifacts/hf_cache`, disables Xet transfers, and preloads CLIP before the long training command,
+- reuses an attached standalone CLIP model directory when present, otherwise downloads `openai/clip-vit-base-patch32` once into `/kaggle/working/masi_artifacts/hf_models/openai_clip-vit-base-patch32` and creates a zip that can be published as a private Kaggle Dataset/Model for later sessions,
 - derives a bounded Kaggle runtime config from `configs/Full_dataset.json` by default so the prepared full dataset is sampled within single-session memory limits; the full-dataset notebook now exposes `smoke_safe` and `scaled_safe` profiles in its first code cell,
 - validates preloaded images from the attached dataset and downloads only missing ones into `/kaggle/working/masi_artifacts/data/processed/...`,
-- runs the same `train_masi.py` launcher against the prepared subset config,
+- runs the same `train_masi.py` launcher against the prepared subset config with compact percentage bars for CLIP encoding, Phase 1 alignment, Phase 2 RQ-VAE training, and Phase 3 MLM/autoregressive training,
 - packages the resulting manifests, checkpoints, and any writable-cache artifacts into one zip bundle that can be reattached to resume a later session.
 
 Where Kaggle checkpoints go:
@@ -153,12 +154,14 @@ Where Kaggle checkpoints go:
 - a large run writes checkpoints under `/kaggle/working/masi_artifacts/outputs/amazon_csj_subset_large_train/checkpoints/`,
 - final stage checkpoints stay at the phase root, such as `phase12_tokens/behavior_alignment.pt` and `phase3_experiment/generative_recommender.pt`,
 - periodic step checkpoints are retained in sibling directories such as `phase12_tokens/behavior_alignment_steps/step_0000025.pt` and `phase3_experiment/generative_recommender_steps/step_0000025.pt`.
+- the full-dataset Kaggle-safe notebook profiles now default to step checkpoints every 25 optimizer steps, and each periodic checkpoint directory writes a `latest.json` manifest with the newest retained checkpoint path.
 
 How not to lose them after the session ends:
 
 - anything under `/kaggle/working` is ephemeral until you explicitly persist it,
 - use the notebook's zip-bundle packaging step and either `Save Version` on the Kaggle notebook or publish the bundle as a private Kaggle Dataset,
 - on the next session, reattach that resume dataset and unpack it back into `/kaggle/working/masi_artifacts` before rerunning the launcher.
+- for CLIP specifically, publish `/kaggle/working/masi_artifacts/hf_models/openai_clip-vit-base-patch32.zip` as a private Kaggle Dataset/Model, then attach it to future notebooks; the CLIP cell auto-detects a directory with `config.json`, `preprocessor_config.json`, and model weights under `/kaggle/input`.
 
 ## Deferred Full-Corpus Path
 

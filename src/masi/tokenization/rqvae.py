@@ -12,11 +12,14 @@ state:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+from masi.common.progress import make_progress_bar
 
 
 @dataclass(slots=True)
@@ -188,7 +191,7 @@ def train_rqvae_model(
     device: torch.device,
     seed: int,
     refit_codebooks_with_residual_kmeans: bool = False,
-    checkpoint_callback: Callable[..., None] | None = None,
+    checkpoint_callback: Callable[..., object] | None = None,
 ) -> tuple[RQVAEModel, QuantizationResult]:
     """Train an RQ-VAE-style model on one modality's aligned embeddings."""
 
@@ -206,35 +209,44 @@ def train_rqvae_model(
     loss_history: list[float] = []
     global_step = 0
 
-    for epoch_index in range(epochs):
-        permutation = torch.randperm(data.size(0), generator=generator)
-        shuffled = data[permutation]
+    batches_per_epoch = (data.size(0) + batch_size - 1) // batch_size
+    total_steps = epochs * batches_per_epoch
+    with make_progress_bar(total=total_steps, desc="RQ-VAE train") as progress:
+        for epoch_index in range(epochs):
+            permutation = torch.randperm(data.size(0), generator=generator)
+            shuffled = data[permutation]
 
-        for batch_index, start in enumerate(range(0, shuffled.size(0), batch_size), start=1):
-            # The learned encoder/decoder pair gives the quantizer a smoother
-            # latent space before we freeze the final code assignments with the
-            # residual k-means fit below.
-            batch = shuffled[start : start + batch_size].to(device)
-            optimizer.zero_grad()
-            reconstructed, _, latent, quantized = model(batch)
-            reconstruction_loss = F.mse_loss(reconstructed, batch)
-            commitment_loss = F.mse_loss(latent, quantized.detach()) + F.mse_loss(quantized, latent.detach())
-            loss = reconstruction_loss + commitment_weight * commitment_loss
-            loss.backward()
-            optimizer.step()
-            loss_value = float(loss.detach().cpu().item())
-            loss_history.append(loss_value)
-            global_step += 1
+            for batch_index, start in enumerate(range(0, shuffled.size(0), batch_size), start=1):
+                # The learned encoder/decoder pair gives the quantizer a smoother
+                # latent space before we freeze the final code assignments with the
+                # residual k-means fit below.
+                batch = shuffled[start : start + batch_size].to(device)
+                optimizer.zero_grad()
+                reconstructed, _, latent, quantized = model(batch)
+                reconstruction_loss = F.mse_loss(reconstructed, batch)
+                commitment_loss = F.mse_loss(latent, quantized.detach()) + F.mse_loss(quantized, latent.detach())
+                loss = reconstruction_loss + commitment_weight * commitment_loss
+                loss.backward()
+                optimizer.step()
+                loss_value = float(loss.detach().cpu().item())
+                loss_history.append(loss_value)
+                global_step += 1
 
-            if checkpoint_callback is not None:
-                checkpoint_callback(
-                    model=model,
-                    optimizer=optimizer,
-                    global_step=global_step,
-                    epoch_index=epoch_index + 1,
-                    step_in_epoch=batch_index,
-                    loss=loss_value,
-                )
+                checkpoint_path = None
+                if checkpoint_callback is not None:
+                    checkpoint_path = checkpoint_callback(
+                        model=model,
+                        optimizer=optimizer,
+                        global_step=global_step,
+                        epoch_index=epoch_index + 1,
+                        step_in_epoch=batch_index,
+                        loss=loss_value,
+                    )
+                postfix = {"loss": f"{loss_value:.4f}"}
+                if checkpoint_path is not None:
+                    postfix["ckpt"] = Path(str(checkpoint_path)).name
+                progress.set_postfix(postfix)
+                progress.update(1)
 
     with torch.no_grad():
         latent_data = model.encoder(data.to(device))

@@ -73,11 +73,11 @@
     "min_sequence_items": 2
   },
   "checkpointing": {
-    "alignment_save_steps": 100,
-    "text_rqvae_save_steps": 100,
-    "vision_rqvae_save_steps": 100,
-    "mlm_save_steps": 100,
-    "autoregressive_save_steps": 100,
+    "alignment_save_steps": 25,
+    "text_rqvae_save_steps": 25,
+    "vision_rqvae_save_steps": 25,
+    "mlm_save_steps": 25,
+    "autoregressive_save_steps": 25,
     "keep_last": 3
   },
   "method_toggles": {
