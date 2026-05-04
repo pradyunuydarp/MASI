@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from random import Random
 from statistics import mean
 
 import torch
 
+from masi.common.progress import make_progress_bar
 from masi.recommender.generative import GenerativeSIDRecommender
 from masi.recommender.retrieval import rank_catalog_candidates
 from masi.recommender.vocabulary import TokenVocabulary
@@ -121,6 +123,30 @@ def coverage_at_k(*, ranked_lists: list[list[str]], catalog_item_count: int, k: 
     return len(recommended_items) / float(catalog_item_count)
 
 
+def _candidate_pool_for_example(
+    *,
+    candidate_item_ids: list[str],
+    target_item_id: str,
+    max_eval_candidates: int | None,
+    seed: int,
+    user_id: str,
+) -> list[str]:
+    """Return a deterministic candidate subset that always includes target."""
+
+    if max_eval_candidates is None or max_eval_candidates <= 0 or len(candidate_item_ids) <= max_eval_candidates:
+        return candidate_item_ids
+
+    cap = max(1, int(max_eval_candidates))
+    negatives = [item_id for item_id in candidate_item_ids if item_id != target_item_id]
+    digest = hashlib.sha256(f"{seed}:{user_id}:{target_item_id}".encode("utf-8")).hexdigest()
+    rng = Random(int(digest[:16], 16))
+    sampled_negative_count = max(0, cap - 1)
+    if len(negatives) > sampled_negative_count:
+        negatives = rng.sample(negatives, sampled_negative_count)
+    capped = sorted([target_item_id, *negatives])
+    return [item_id for item_id in capped if item_id in candidate_item_ids]
+
+
 def evaluate_generative_ranking(
     *,
     model: GenerativeSIDRecommender,
@@ -131,6 +157,10 @@ def evaluate_generative_ranking(
     max_sequence_length: int,
     device: torch.device,
     top_k: int,
+    max_eval_candidates: int | None = None,
+    candidate_batch_size: int | None = None,
+    seed: int = 0,
+    split_name: str = "eval",
 ) -> dict[str, object]:
     """Evaluate a generative recommender on ranking metrics."""
 
@@ -141,6 +171,9 @@ def evaluate_generative_ranking(
             f"coverage@{top_k}": 0.0,
             "avg_latency_ms": 0.0,
             "num_examples": 0,
+            "candidate_item_count": len(candidate_item_ids),
+            "max_eval_candidates": max_eval_candidates,
+            "candidate_batch_size": candidate_batch_size,
         }
 
     model.eval()
@@ -149,23 +182,43 @@ def evaluate_generative_ranking(
     ndcg_scores: list[float] = []
     latencies: list[float] = []
 
-    with torch.no_grad():
-        for example in examples:
+    with torch.no_grad(), make_progress_bar(
+        total=len(examples),
+        desc=f"Evaluate {split_name}",
+        unit="user",
+    ) as progress:
+        for index, example in enumerate(examples, start=1):
+            active_candidate_item_ids = _candidate_pool_for_example(
+                candidate_item_ids=candidate_item_ids,
+                target_item_id=example.target_item_id,
+                max_eval_candidates=max_eval_candidates,
+                seed=seed,
+                user_id=example.user_id,
+            )
             retrieval = rank_catalog_candidates(
                 model=model,
                 history_item_ids=example.history_item_ids,
-                candidate_item_ids=candidate_item_ids,
+                candidate_item_ids=active_candidate_item_ids,
                 item_tokens=item_tokens,
                 vocabulary=vocabulary,
                 max_sequence_length=max_sequence_length,
                 device=device,
                 top_k=top_k,
+                candidate_batch_size=candidate_batch_size,
             )
             ranked_item_ids = [candidate.item_id for candidate in retrieval.ranked_candidates]
             ranked_lists.append(ranked_item_ids)
             hit_scores.append(hit_rate_at_k(ranked_item_ids=ranked_item_ids, target_item_id=example.target_item_id, k=top_k))
             ndcg_scores.append(ndcg_at_k(ranked_item_ids=ranked_item_ids, target_item_id=example.target_item_id, k=top_k))
             latencies.append(retrieval.latency_ms)
+            progress.set_postfix(
+                {
+                    "users": index,
+                    "candidates": len(active_candidate_item_ids),
+                    "lat_ms": f"{retrieval.latency_ms:.1f}",
+                }
+            )
+            progress.update(1)
 
     return {
         f"hr@{top_k}": mean(hit_scores),
@@ -177,6 +230,9 @@ def evaluate_generative_ranking(
         ),
         "avg_latency_ms": mean(latencies),
         "num_examples": len(examples),
+        "candidate_item_count": len(candidate_item_ids),
+        "max_eval_candidates": max_eval_candidates,
+        "candidate_batch_size": candidate_batch_size,
     }
 
 

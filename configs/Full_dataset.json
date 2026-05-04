@@ -68,6 +68,8 @@
     "mlm_epochs": 2,
     "autoregressive_epochs": 3,
     "top_k": 10,
+    "max_eval_candidates": 2048,
+    "eval_candidate_batch_size": 128,
     "cold_start_ratio": 0.2,
     "min_train_history": 1,
     "min_sequence_items": 2

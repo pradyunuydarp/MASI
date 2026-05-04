@@ -268,6 +268,8 @@ def main() -> None:
         "cold_start_ratio": float(config["experiment"]["cold_start_ratio"]),
         "min_train_history": int(config["experiment"]["min_train_history"]),
         "min_sequence_items": int(config["experiment"]["min_sequence_items"]),
+        "max_eval_candidates": config["experiment"].get("max_eval_candidates"),
+        "eval_candidate_batch_size": config["experiment"].get("eval_candidate_batch_size"),
         "outputs_root": str(experiment_outputs_root.resolve()),
         "checkpoint_root": str((checkpoint_root / "phase3_experiment").resolve()),
         "token_artifact_path": token_config["fused_ids_path"],

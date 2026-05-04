@@ -370,8 +370,50 @@ def main() -> None:
             checkpoint_callback=_generative_checkpoint_callback,
         )
 
+    checkpoint_paths: dict[str, str] = {}
+    if resolved_checkpoint_root is not None:
+        generative_checkpoint_path = resolved_checkpoint_root / "generative_recommender.pt"
+        torch.save(
+            {
+                "config": config,
+                "method_toggles": toggle_state,
+                "model_state_dict": generative_model.state_dict(),
+                "vocabulary": vocabulary.token_to_id,
+                "item_tokens": item_tokens,
+            },
+            generative_checkpoint_path,
+        )
+        checkpoint_paths["generative_recommender"] = str(generative_checkpoint_path)
+
+        if mlm_history:
+            mlm_checkpoint_path = resolved_checkpoint_root / "cross_modal_mlm.pt"
+            torch.save(
+                {
+                    "config": config,
+                    "method_toggles": toggle_state,
+                    "model_state_dict": mlm_model.state_dict(),
+                    "vocabulary": vocabulary.token_to_id,
+                },
+                mlm_checkpoint_path,
+            )
+            checkpoint_paths["cross_modal_mlm"] = str(mlm_checkpoint_path)
+
+        training_artifact_summary_path = write_json(
+            {
+                "mlm_status": "trained" if mlm_history else ("disabled" if not toggles.use_cross_modal_mlm else "skipped_no_examples"),
+                "generative_finetuning_status": "trained" if generative_history else ("disabled" if not toggles.use_generative_finetuning else "skipped_no_examples"),
+                "mlm_loss_history": mlm_history,
+                "autoregressive_loss_history": generative_history,
+                "checkpoint_paths": checkpoint_paths,
+            },
+            resolved_checkpoint_root / "training_artifact_summary.json",
+        )
+        checkpoint_paths["training_artifact_summary"] = str(training_artifact_summary_path)
+
     candidate_item_ids = sorted(item_tokens)
     top_k = int(config["top_k"])
+    max_eval_candidates = _optional_positive_int(config.get("max_eval_candidates"))
+    eval_candidate_batch_size = _optional_positive_int(config.get("eval_candidate_batch_size"))
     warm_metrics = evaluate_generative_ranking(
         model=generative_model,
         examples=split.warm_examples,
@@ -381,6 +423,10 @@ def main() -> None:
         max_sequence_length=generative_model.max_sequence_length,
         device=device,
         top_k=top_k,
+        max_eval_candidates=max_eval_candidates,
+        candidate_batch_size=eval_candidate_batch_size,
+        seed=seed,
+        split_name="warm",
     )
     cold_metrics = evaluate_generative_ranking(
         model=generative_model,
@@ -391,6 +437,10 @@ def main() -> None:
         max_sequence_length=generative_model.max_sequence_length,
         device=device,
         top_k=top_k,
+        max_eval_candidates=max_eval_candidates,
+        candidate_batch_size=eval_candidate_batch_size,
+        seed=seed,
+        split_name="cold",
     )
 
     sample_generation = {}
@@ -421,7 +471,6 @@ def main() -> None:
         }
 
     outputs_root = ensure_directory(repo_root / str(config["outputs_root"]))
-    checkpoint_paths: dict[str, str] = {}
     periodic_checkpoint_dirs: dict[str, str] = {}
     periodic_latest_checkpoint_paths: dict[str, str] = {}
     if mlm_checkpoint_manager is not None and mlm_checkpoint_manager.enabled:
@@ -434,33 +483,6 @@ def main() -> None:
         latest_generative_checkpoint = generative_checkpoint_manager.latest_checkpoint()
         if latest_generative_checkpoint is not None:
             periodic_latest_checkpoint_paths["generative_recommender"] = latest_generative_checkpoint
-    if resolved_checkpoint_root is not None:
-        generative_checkpoint_path = resolved_checkpoint_root / "generative_recommender.pt"
-        torch.save(
-            {
-                "config": config,
-                "method_toggles": toggle_state,
-                "model_state_dict": generative_model.state_dict(),
-                "vocabulary": vocabulary.token_to_id,
-                "item_tokens": item_tokens,
-            },
-            generative_checkpoint_path,
-        )
-        checkpoint_paths["generative_recommender"] = str(generative_checkpoint_path)
-
-        if mlm_history:
-            mlm_checkpoint_path = resolved_checkpoint_root / "cross_modal_mlm.pt"
-            torch.save(
-                {
-                    "config": config,
-                    "method_toggles": toggle_state,
-                    "model_state_dict": mlm_model.state_dict(),
-                    "vocabulary": vocabulary.token_to_id,
-                },
-                mlm_checkpoint_path,
-            )
-            checkpoint_paths["cross_modal_mlm"] = str(mlm_checkpoint_path)
-
     summary = {
         "seed": seed,
         "device": str(device),

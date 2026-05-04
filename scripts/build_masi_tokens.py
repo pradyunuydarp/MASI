@@ -210,6 +210,7 @@ def main() -> None:
     else:
         image_embeddings = {}
 
+    checkpoint_paths: dict[str, str] = {}
     alignment_checkpoint_manager = (
         StepCheckpointManager(
             checkpoint_root=resolved_checkpoint_root,
@@ -263,6 +264,17 @@ def main() -> None:
         use_behavior_alignment=toggles.use_behavior_alignment,
         checkpoint_callback=_alignment_checkpoint_callback,
     )
+    if resolved_checkpoint_root is not None and alignment_result.model_state_dict is not None:
+        alignment_checkpoint_path = resolved_checkpoint_root / "behavior_alignment.pt"
+        torch.save(
+            {
+                "config": config,
+                "method_toggles": toggle_state,
+                "model_state_dict": alignment_result.model_state_dict,
+            },
+            alignment_checkpoint_path,
+        )
+        checkpoint_paths["behavior_alignment"] = str(alignment_checkpoint_path)
 
     text_quantizer_model = None
     image_quantizer_model = None
@@ -323,6 +335,18 @@ def main() -> None:
             ),
             checkpoint_callback=_text_rqvae_checkpoint_callback,
         )
+        if resolved_checkpoint_root is not None:
+            text_quantizer_checkpoint_path = resolved_checkpoint_root / "text_rqvae.pt"
+            torch.save(
+                {
+                    "config": config,
+                    "modality": "text",
+                    "model_state_dict": text_quantizer_model.state_dict(),
+                    "code_indices_by_item": text_quantization.code_indices_by_item,
+                },
+                text_quantizer_checkpoint_path,
+            )
+            checkpoint_paths["text_rqvae"] = str(text_quantizer_checkpoint_path)
     else:
         text_checkpoint_manager = None
     if toggles.use_visual_modality:
@@ -378,6 +402,18 @@ def main() -> None:
             ),
             checkpoint_callback=_vision_rqvae_checkpoint_callback,
         )
+        if resolved_checkpoint_root is not None:
+            image_quantizer_checkpoint_path = resolved_checkpoint_root / "vision_rqvae.pt"
+            torch.save(
+                {
+                    "config": config,
+                    "modality": "vision",
+                    "model_state_dict": image_quantizer_model.state_dict(),
+                    "code_indices_by_item": image_quantization.code_indices_by_item,
+                },
+                image_quantizer_checkpoint_path,
+            )
+            checkpoint_paths["vision_rqvae"] = str(image_quantizer_checkpoint_path)
     else:
         image_checkpoint_manager = None
 
@@ -401,7 +437,6 @@ def main() -> None:
         alignment_status = "skipped_no_positive_pairs"
     else:
         alignment_status = "skipped"
-    checkpoint_paths: dict[str, str] = {}
     periodic_checkpoint_dirs: dict[str, str] = {}
     periodic_latest_checkpoint_paths: dict[str, str] = {}
     if alignment_checkpoint_manager is not None and alignment_checkpoint_manager.enabled:
@@ -419,42 +454,6 @@ def main() -> None:
         latest_image_checkpoint = image_checkpoint_manager.latest_checkpoint()
         if latest_image_checkpoint is not None:
             periodic_latest_checkpoint_paths["vision_rqvae"] = latest_image_checkpoint
-    if resolved_checkpoint_root is not None:
-        if alignment_result.model_state_dict is not None:
-            alignment_checkpoint_path = resolved_checkpoint_root / "behavior_alignment.pt"
-            torch.save(
-                {
-                    "config": config,
-                    "method_toggles": toggle_state,
-                    "model_state_dict": alignment_result.model_state_dict,
-                },
-                alignment_checkpoint_path,
-            )
-            checkpoint_paths["behavior_alignment"] = str(alignment_checkpoint_path)
-        if text_quantization is not None and text_quantizer_model is not None:
-            text_quantizer_checkpoint_path = resolved_checkpoint_root / "text_rqvae.pt"
-            torch.save(
-                {
-                    "config": config,
-                    "modality": "text",
-                    "model_state_dict": text_quantizer_model.state_dict(),
-                    "code_indices_by_item": text_quantization.code_indices_by_item,
-                },
-                text_quantizer_checkpoint_path,
-            )
-            checkpoint_paths["text_rqvae"] = str(text_quantizer_checkpoint_path)
-        if image_quantization is not None and image_quantizer_model is not None:
-            image_quantizer_checkpoint_path = resolved_checkpoint_root / "vision_rqvae.pt"
-            torch.save(
-                {
-                    "config": config,
-                    "modality": "vision",
-                    "model_state_dict": image_quantizer_model.state_dict(),
-                    "code_indices_by_item": image_quantization.code_indices_by_item,
-                },
-                image_quantizer_checkpoint_path,
-            )
-            checkpoint_paths["vision_rqvae"] = str(image_quantizer_checkpoint_path)
     summary = {
         "seed": seed,
         "device": str(device),

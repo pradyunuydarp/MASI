@@ -145,6 +145,7 @@ What the Kaggle path does:
 - derives a bounded Kaggle runtime config from `configs/Full_dataset.json` by default so the prepared full dataset is sampled within single-session memory limits; the full-dataset notebook now exposes `smoke_safe` and `scaled_safe` profiles in its first code cell,
 - validates preloaded images from the attached dataset and downloads only missing ones into `/kaggle/working/masi_artifacts/data/processed/...`,
 - runs the same `train_masi.py` launcher against the prepared subset config with compact percentage bars for CLIP encoding, Phase 1 alignment, Phase 2 RQ-VAE training, and Phase 3 MLM/autoregressive training,
+- caps and batches warm/cold ranking candidates in the full-dataset notebook so evaluation shows progress and does not spend the whole session on exhaustive catalog scoring,
 - packages the resulting manifests, checkpoints, and any writable-cache artifacts into one zip bundle that can be reattached to resume a later session.
 
 Where Kaggle checkpoints go:
@@ -153,6 +154,7 @@ Where Kaggle checkpoints go:
 - a medium run writes checkpoints under `/kaggle/working/masi_artifacts/outputs/amazon_csj_subset_medium_train/checkpoints/`,
 - a large run writes checkpoints under `/kaggle/working/masi_artifacts/outputs/amazon_csj_subset_large_train/checkpoints/`,
 - final stage checkpoints stay at the phase root, such as `phase12_tokens/behavior_alignment.pt` and `phase3_experiment/generative_recommender.pt`,
+- Phase 3 now writes `phase3_experiment/generative_recommender.pt`, `phase3_experiment/cross_modal_mlm.pt`, and `phase3_experiment/training_artifact_summary.json` before warm/cold ranking evaluation starts,
 - periodic step checkpoints are retained in sibling directories such as `phase12_tokens/behavior_alignment_steps/step_0000025.pt` and `phase3_experiment/generative_recommender_steps/step_0000025.pt`.
 - the full-dataset Kaggle-safe notebook profiles now default to step checkpoints every 25 optimizer steps, and each periodic checkpoint directory writes a `latest.json` manifest with the newest retained checkpoint path.
 

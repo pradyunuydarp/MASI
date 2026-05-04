@@ -92,6 +92,78 @@ def score_candidate_item(
     return float(gathered.mean().detach().cpu().item())
 
 
+def score_candidate_items_batched(
+    *,
+    model: GenerativeSIDRecommender,
+    history_item_ids: list[str],
+    candidate_item_ids: list[str],
+    item_tokens: dict[str, list[int]],
+    vocabulary: TokenVocabulary,
+    max_sequence_length: int,
+    device: torch.device,
+    candidate_batch_size: int,
+) -> list[RetrievalCandidate]:
+    """Score candidate items in mini-batches by normalized token likelihood."""
+
+    batch_size = max(1, int(candidate_batch_size))
+    history_tokens = serialize_history_tokens(
+        history_item_ids=history_item_ids,
+        item_tokens=item_tokens,
+        vocabulary=vocabulary,
+    )
+    scored: list[RetrievalCandidate] = []
+
+    for start in range(0, len(candidate_item_ids), batch_size):
+        batch_item_ids = [
+            item_id for item_id in candidate_item_ids[start : start + batch_size]
+            if item_id in item_tokens
+        ]
+        if not batch_item_ids:
+            continue
+
+        sequences: list[list[int]] = []
+        candidate_lengths: list[int] = []
+        for item_id in batch_item_ids:
+            candidate_tokens = serialize_target_tokens(
+                target_item_id=item_id,
+                item_tokens=item_tokens,
+                vocabulary=vocabulary,
+            )
+            combined = history_tokens + candidate_tokens
+            if len(combined) > max_sequence_length:
+                combined = combined[-max_sequence_length:]
+            sequences.append(combined)
+            candidate_lengths.append(min(len(candidate_tokens), max(0, len(combined) - 1)))
+
+        max_length = max(len(sequence) for sequence in sequences)
+        padded = [
+            sequence + [vocabulary.pad_id] * (max_length - len(sequence))
+            for sequence in sequences
+        ]
+        model_input = torch.tensor(padded, dtype=torch.long, device=device)
+        logits = model(model_input)
+        log_probs = F.log_softmax(logits[:, :-1, :], dim=-1)
+        labels = model_input[:, 1:]
+
+        for row_index, item_id in enumerate(batch_item_ids):
+            candidate_length = candidate_lengths[row_index]
+            if candidate_length <= 0:
+                score = -inf
+            else:
+                label_length = len(sequences[row_index]) - 1
+                start_index = max(0, label_length - candidate_length)
+                candidate_log_probs = log_probs[row_index, start_index:label_length, :]
+                candidate_labels = labels[row_index, start_index:label_length]
+                gathered = candidate_log_probs.gather(
+                    dim=-1,
+                    index=candidate_labels.unsqueeze(-1),
+                ).squeeze(-1)
+                score = float(gathered.mean().detach().cpu().item())
+            scored.append(RetrievalCandidate(item_id=item_id, score=score))
+
+    return scored
+
+
 def rank_catalog_candidates(
     *,
     model: GenerativeSIDRecommender,
@@ -102,26 +174,39 @@ def rank_catalog_candidates(
     max_sequence_length: int,
     device: torch.device,
     top_k: int,
+    candidate_batch_size: int | None = None,
 ) -> RetrievalResult:
     """Rank candidate items by token-sequence likelihood."""
 
     start_time = time.perf_counter()
-    scored = [
-        RetrievalCandidate(
-            item_id=item_id,
-            score=score_candidate_item(
-                model=model,
-                history_item_ids=history_item_ids,
-                candidate_item_id=item_id,
-                item_tokens=item_tokens,
-                vocabulary=vocabulary,
-                max_sequence_length=max_sequence_length,
-                device=device,
-            ),
+    if candidate_batch_size is not None and candidate_batch_size > 1:
+        scored = score_candidate_items_batched(
+            model=model,
+            history_item_ids=history_item_ids,
+            candidate_item_ids=candidate_item_ids,
+            item_tokens=item_tokens,
+            vocabulary=vocabulary,
+            max_sequence_length=max_sequence_length,
+            device=device,
+            candidate_batch_size=candidate_batch_size,
         )
-        for item_id in candidate_item_ids
-        if item_id in item_tokens
-    ]
+    else:
+        scored = [
+            RetrievalCandidate(
+                item_id=item_id,
+                score=score_candidate_item(
+                    model=model,
+                    history_item_ids=history_item_ids,
+                    candidate_item_id=item_id,
+                    item_tokens=item_tokens,
+                    vocabulary=vocabulary,
+                    max_sequence_length=max_sequence_length,
+                    device=device,
+                ),
+            )
+            for item_id in candidate_item_ids
+            if item_id in item_tokens
+        ]
     ranked = sorted(scored, key=lambda candidate: (-candidate.score, candidate.item_id))[:top_k]
     latency_ms = (time.perf_counter() - start_time) * 1000.0
     return RetrievalResult(ranked_candidates=ranked, latency_ms=latency_ms)
@@ -163,4 +248,5 @@ __all__ = [
     "match_generated_sequence_to_items",
     "rank_catalog_candidates",
     "score_candidate_item",
+    "score_candidate_items_batched",
 ]
