@@ -8,7 +8,7 @@ This log captures operational lessons from getting `notebooks/08_full_dataset_pi
 - Source config: `configs/Full_dataset.json`
 - Kaggle runtime config: written at `/kaggle/working/masi_artifacts/configs/Full_dataset.kaggle_safe_runtime.json`
 - Kaggle storage root: `/kaggle/working/masi_artifacts`
-- Default Kaggle run root: `/kaggle/working/masi_artifacts/outputs/amazon_csj_full_dataset_kaggle_safe_train`
+- Default Kaggle run root: `/kaggle/working/masi_artifacts/outputs/amazon_csj_full_dataset_kaggle_long_safe_train`
 - Attached dataset expected at: `/kaggle/input/datasets/dheerajrajanala/masi-amazon-csj-full-dataset`
 - Required attached dataset entries:
   - `Clothing_Shoes_and_Jewelry.jsonl`
@@ -22,7 +22,8 @@ The notebook intentionally runs a bounded slice from the prepared full dataset o
 Current Kaggle-safe profile support:
 
 - `smoke_safe`: preserves the previously validated bounded run used by the saved Kaggle output notebook.
-- `scaled_safe`: the next recommended metric-improvement profile, still bounded because CLIP embeddings are kept in memory.
+- `scaled_safe`: the previously completed metric-improvement profile, still bounded because CLIP embeddings are kept in memory.
+- `long_safe`: the next recommended metric-improvement profile, targeting roughly a 5-6 hour Kaggle session.
 
 Previously observed `smoke_safe` caps:
 
@@ -38,7 +39,7 @@ Previously observed `smoke_safe` caps:
 - `experiment.mlm_epochs = 1`
 - `experiment.autoregressive_epochs = 2`
 
-Current recommended `scaled_safe` caps:
+Completed `scaled_safe` caps:
 
 - `max_users = 4096`
 - `max_items = 8192`
@@ -56,9 +57,34 @@ Current recommended `scaled_safe` caps:
 - `experiment.num_heads = 8`
 - `experiment.num_layers = 4`
 
+Current recommended `long_safe` caps:
+
+- `max_users = 8192`
+- `max_items = 16384`
+- `max_review_records = 40_000_000`
+- `clip.batch_size = 16`
+- `alignment.batch_size = 256`
+- `alignment.epochs = 8`
+- `alignment.learning_rate = 0.0004`
+- `alignment.hard_negative_count = 24`
+- `alignment.window_size = 4`
+- `tokenization.batch_size = 256`
+- `tokenization.epochs = 25`
+- `tokenization.learning_rate = 0.0004`
+- `experiment.batch_size = 32`
+- `experiment.history_max_tokens = 160`
+- `experiment.mlm_epochs = 8`
+- `experiment.autoregressive_epochs = 25`
+- `experiment.learning_rate = 0.00025`
+- `experiment.hidden_dim = 256`
+- `experiment.num_heads = 8`
+- `experiment.num_layers = 4`
+- `experiment.max_eval_candidates = 1024`
+- `experiment.eval_candidate_batch_size = 128`
+
 Set `USE_KAGGLE_SAFE_LIMITS = False` only on a larger machine or after adding sharded CLIP embedding persistence.
 
-The saved output notebook `Kaggle_interactions/masi-full-dataset.ipynb` produced warm `HR@10 = 0.04248` and cold `HR@10 = 0.0` under the smoke-scale profile. See `docs/kaggle_full_dataset_scaleup_journey.md` for the interpretation and the next scale-up plan.
+The saved output notebook `Kaggle_interactions/masi-full-dataset.ipynb` produced warm `HR@10 = 0.08262` and cold `HR@10 = 0.0` under the `scaled_safe` profile. The older smoke-scale result was warm `HR@10 = 0.04248` and cold `HR@10 = 0.0`. See `docs/kaggle_full_dataset_scaleup_journey.md` for the interpretation and the next scale-up plan.
 
 ## Issues Encountered And Fixes
 

@@ -4,13 +4,15 @@ This note records the interpretation of the saved Kaggle output notebook
 `Kaggle_interactions/masi-full-dataset.ipynb` and the next bounded scale-up
 plan for `notebooks/08_full_dataset_pipeline.ipynb`.
 
-## What The Saved Kaggle Run Actually Was
+## What The Saved Kaggle Runs Actually Were
 
-The run completed the full MASI pipeline, but it was intentionally capped by
-Kaggle-safe limits. It should be treated as a smoke-quality result, not as the
-final full-dataset result.
+The saved interaction notebook now contains two useful historical results:
+the older smoke-scale result documented below and the newer `scaled_safe`
+result. Both completed the full MASI pipeline, but both were intentionally
+capped by Kaggle-safe limits. They should not be treated as final full-dataset
+results.
 
-Observed runtime config:
+Older smoke runtime config:
 
 ```text
 run_name = amazon_csj_full_dataset_kaggle_safe_train
@@ -25,7 +27,7 @@ experiment.mlm_epochs = 1
 experiment.autoregressive_epochs = 2
 ```
 
-Observed data after filtering:
+Older smoke data after filtering:
 
 ```text
 users = 373
@@ -37,7 +39,7 @@ cold examples = 67
 cold items = 49
 ```
 
-Observed metrics:
+Older smoke metrics:
 
 ```text
 warm HR@10 = 0.042483660130718956
@@ -60,6 +62,54 @@ Interpretation:
 - Coverage is already nontrivial, which means retrieval is not collapsed to a
   tiny item set. The next priority is ranking quality.
 
+Newer `scaled_safe` result from `Kaggle_interactions/masi-full-dataset.ipynb`:
+
+```text
+run_name = amazon_csj_full_dataset_kaggle_scaled_safe_train
+max_users = 4096
+max_items = 8192
+max_review_records = 20,000,000
+alignment.epochs = 5
+tokenization.epochs = 15
+experiment.mlm_epochs = 5
+experiment.autoregressive_epochs = 15
+```
+
+Observed filtered scale:
+
+```text
+users = 4071
+items after token filter = 8078
+train examples = 91935
+MLM examples = 16156
+warm examples = 3292
+cold examples = 779
+cold items = 511
+```
+
+Observed metrics:
+
+```text
+warm HR@10 = 0.08262454434993925
+warm NDCG@10 = 0.05228849491659201
+warm Coverage@10 = 0.7176281257737064
+
+cold HR@10 = 0.0
+cold NDCG@10 = 0.0
+cold Coverage@10 = 0.4202772963604853
+```
+
+Interpretation:
+
+- Warm ranking improved over smoke scale, which confirms that more users,
+  items, examples, and autoregressive epochs are helping.
+- Cold ranking still has zero hit rate even though cold coverage is broad.
+  That points to a ranking/token-alignment issue rather than total retrieval
+  collapse.
+- The Phase 1/2 cell in that run skipped because artifacts already existed
+  under the selected run root. For the next larger profile, use a new run name
+  so Phase 1/2 is rebuilt for the larger item universe.
+
 ## Where To Change Training Scale
 
 For Kaggle, change only the first code cell in
@@ -75,46 +125,52 @@ base. The notebook derives a runtime config and writes it to:
 The knobs are:
 
 ```python
-KAGGLE_SAFE_PROFILE = "scaled_safe"
+KAGGLE_SAFE_PROFILE = "long_safe"
 KAGGLE_SAFE_PROFILES = {
     "smoke_safe": {...},
     "scaled_safe": {...},
+    "long_safe": {...},
 }
 ```
 
 Use `smoke_safe` only to verify that the notebook still runs end to end. Use
-`scaled_safe` for the next metric-improvement run.
+`scaled_safe` to reproduce the completed two-hour run. Use `long_safe` for the
+next metric-improvement run.
 
 ## Next Safe Scaling Profile
 
-The current recommended profile is:
+The current recommended profile is `long_safe`:
 
 ```text
-max_users = 4096
-max_items = 8192
-max_review_records = 20,000,000
+max_users = 8192
+max_items = 16384
+max_review_records = 40,000,000
 clip.batch_size = 16
 alignment.batch_size = 256
-alignment.epochs = 5
-alignment.learning_rate = 0.0005
-alignment.hard_negative_count = 16
-alignment.window_size = 3
+alignment.epochs = 8
+alignment.learning_rate = 0.0004
+alignment.hard_negative_count = 24
+alignment.window_size = 4
 tokenization.batch_size = 256
-tokenization.epochs = 15
-tokenization.learning_rate = 0.0005
+tokenization.epochs = 25
+tokenization.learning_rate = 0.0004
 experiment.batch_size = 32
-experiment.history_max_tokens = 128
-experiment.mlm_epochs = 5
-experiment.autoregressive_epochs = 15
-experiment.learning_rate = 0.0003
+experiment.history_max_tokens = 160
+experiment.mlm_epochs = 8
+experiment.autoregressive_epochs = 25
+experiment.learning_rate = 0.00025
 experiment.hidden_dim = 256
 experiment.num_heads = 8
 experiment.num_layers = 4
+experiment.max_eval_candidates = 1024
+experiment.eval_candidate_batch_size = 128
 ```
 
 Why this profile:
 
-- It increases users and items enough to make warm/cold splits more stable.
+- It doubles the bounded users and items from the completed `scaled_safe` run
+  while staying below the proposal-scale config that previously risked Kaggle
+  OOM.
 - It gives Phase 1 more behavioral signal before quantization.
 - It gives RQ-VAE codebooks enough training time to form useful text/visual
   semantic IDs.
@@ -126,8 +182,8 @@ Why this profile:
 If Kaggle kills this profile with `SIGKILL: 9`, lower these first:
 
 ```text
-max_items: 8192 -> 4096
-max_users: 4096 -> 2048
+max_items: 16384 -> 12288 -> 8192
+max_users: 8192 -> 6144 -> 4096
 clip.batch_size: 16 -> 8
 tokenization.batch_size: 256 -> 128
 ```
@@ -146,14 +202,14 @@ Repo source: https://github.com/pradyunuydarp/MASI.git
 Source cfg: /kaggle/working/MASI/configs/Full_dataset.json
 Run config: /kaggle/working/masi_artifacts/configs/Full_dataset.kaggle_safe_runtime.json
 Safe caps:  True
-Safe profile: scaled_safe
+Safe profile: long_safe
 {
-  "max_users": 4096,
-  "max_items": 8192,
-  "max_review_records": 20000000,
+  "max_users": 8192,
+  "max_items": 16384,
+  "max_review_records": 40000000,
   ...
 }
-Run root: /kaggle/working/masi_artifacts/outputs/amazon_csj_full_dataset_kaggle_scaled_safe_train
+Run root: /kaggle/working/masi_artifacts/outputs/amazon_csj_full_dataset_kaggle_long_safe_train
 ```
 
 After the dataset validation cell:
