@@ -174,9 +174,12 @@ def _sample_hard_negative_indices(
 ) -> list[int]:
     """Sample graph-based negatives in packed row-index space."""
 
-    pool = list(negative_pool_indices.get(item_index, []))
-    rng.shuffle(pool)
-    sampled = pool[:sample_size]
+    pool = negative_pool_indices.get(item_index, [])
+    if len(pool) >= sample_size:
+        return rng.sample(pool, sample_size)
+
+    sampled = list(pool)
+    rng.shuffle(sampled)
     if len(sampled) >= sample_size:
         return sampled
 
@@ -206,9 +209,12 @@ def _sample_hard_negatives(
 ) -> list[str]:
     """Sample graph-based negatives for one anchor item."""
 
-    pool = list(negative_pool.get(item_id, []))
-    rng.shuffle(pool)
-    sampled = pool[:sample_size]
+    pool = negative_pool.get(item_id, [])
+    if len(pool) >= sample_size:
+        return rng.sample(pool, sample_size)
+
+    sampled = list(pool)
+    rng.shuffle(sampled)
     if len(sampled) >= sample_size:
         return sampled
 

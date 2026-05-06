@@ -135,6 +135,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [scripts/build_masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/scripts/build_masi_tokens.py), [outputs/masi_tokens_amazon_csj_demo/masi_token_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/masi_token_summary.json)
 - `DONE` Pack Phase 1 text/image embeddings into dense device tensors and train from item row-index tensors instead of per-step dictionary stacking.
   Artifact: [src/masi/alignment/behavior_alignment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/alignment/behavior_alignment.py), [scripts/build_masi_tokens.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/build_masi_tokens.py), `alignment.keep_embeddings_on_device` in `configs/*.json`
+- `DONE` Remove full-pool shuffles from Phase 1 hard-negative sampling so alignment batches sample the requested graph negatives without repeatedly copying large candidate lists.
+  Artifact: [src/masi/alignment/behavior_alignment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/alignment/behavior_alignment.py)
 - `TODO` Evaluate whether projected embeddings improve behavioral clustering for warm items.
 - `TODO` Define the cold-start inference path for items without interaction edges.
 
