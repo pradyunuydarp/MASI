@@ -109,6 +109,15 @@ class BehaviorAwareAlignmentModel(nn.Module):
         self.image_head = ProjectionHead(input_dim, projection_dim, dropout)
 
 
+def _move_optimizer_state_to_device(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
+    """Move optimizer state tensors after loading a CPU checkpoint payload."""
+
+    for state in optimizer.state.values():
+        for key, value in list(state.items()):
+            if torch.is_tensor(value):
+                state[key] = value.to(device)
+
+
 def _sample_hard_negatives(
     *,
     item_id: str,
@@ -193,6 +202,9 @@ def train_behavior_aware_alignment(
     seed: int,
     use_behavior_alignment: bool = True,
     checkpoint_callback: Callable[..., object] | None = None,
+    initial_model_state_dict: dict[str, object] | None = None,
+    initial_optimizer_state_dict: dict[str, object] | None = None,
+    initial_global_step: int = 0,
 ) -> AlignmentResult:
     """Train the Phase 1 behavior-aware projection heads."""
 
@@ -238,7 +250,12 @@ def train_behavior_aware_alignment(
 
     input_dim = next(iter(text_embeddings.values())).shape[-1]
     model = BehaviorAwareAlignmentModel(input_dim=input_dim, projection_dim=projection_dim, dropout=dropout).to(device)
+    if initial_model_state_dict:
+        model.load_state_dict(initial_model_state_dict)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    if initial_optimizer_state_dict:
+        optimizer.load_state_dict(initial_optimizer_state_dict)
+        _move_optimizer_state_to_device(optimizer, device)
 
     positive_pairs = [
         pair for pair in build_positive_item_pairs(user_histories, window_size=window_size)
@@ -247,7 +264,7 @@ def train_behavior_aware_alignment(
     negative_pool = build_graph_negative_pool(user_histories)
     rng = Random(seed)
     loss_history: list[float] = []
-    global_step = 0
+    global_step = max(0, int(initial_global_step))
 
     if not positive_pairs:
         # Small smoke subsets can lose all collaborative pairs after modality

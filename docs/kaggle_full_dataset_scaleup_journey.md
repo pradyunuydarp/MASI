@@ -142,22 +142,22 @@ next metric-improvement run.
 The current recommended profile is `long_safe`:
 
 ```text
-max_users = 8192
-max_items = 16384
-max_review_records = 40,000,000
+max_users = 12288
+max_items = 24576
+max_review_records = 50,000,000
 clip.batch_size = 16
 alignment.batch_size = 256
-alignment.epochs = 8
+alignment.epochs = 10
 alignment.learning_rate = 0.0004
 alignment.hard_negative_count = 24
 alignment.window_size = 4
 tokenization.batch_size = 256
-tokenization.epochs = 25
+tokenization.epochs = 30
 tokenization.learning_rate = 0.0004
 experiment.batch_size = 32
 experiment.history_max_tokens = 160
-experiment.mlm_epochs = 8
-experiment.autoregressive_epochs = 25
+experiment.mlm_epochs = 10
+experiment.autoregressive_epochs = 30
 experiment.learning_rate = 0.00025
 experiment.hidden_dim = 256
 experiment.num_heads = 8
@@ -168,9 +168,9 @@ experiment.eval_candidate_batch_size = 128
 
 Why this profile:
 
-- It doubles the bounded users and items from the completed `scaled_safe` run
-  while staying below the proposal-scale config that previously risked Kaggle
-  OOM.
+- It increases the bounded users and items beyond the completed `scaled_safe`
+  run while staying far below the proposal-scale config that previously risked
+  Kaggle OOM.
 - It gives Phase 1 more behavioral signal before quantization.
 - It gives RQ-VAE codebooks enough training time to form useful text/visual
   semantic IDs.
@@ -178,12 +178,16 @@ Why this profile:
   present as next-item targets during sequential fine-tuning.
 - It improves model capacity for warm ranking without trying the full
   proposal-scale `102400` users and `204800` items in one Kaggle session.
+- It restores a previous exported run bundle automatically and sets
+  `checkpointing.restore_from_checkpoints = true`, so repeated `long_safe`
+  runs continue from recovered stage checkpoints instead of restarting from
+  fresh weights.
 
 If Kaggle kills this profile with `SIGKILL: 9`, lower these first:
 
 ```text
-max_items: 16384 -> 12288 -> 8192
-max_users: 8192 -> 6144 -> 4096
+max_items: 24576 -> 16384 -> 12288 -> 8192
+max_users: 12288 -> 8192 -> 6144 -> 4096
 clip.batch_size: 16 -> 8
 tokenization.batch_size: 256 -> 128
 ```
@@ -204,12 +208,14 @@ Run config: /kaggle/working/masi_artifacts/configs/Full_dataset.kaggle_safe_runt
 Safe caps:  True
 Safe profile: long_safe
 {
-  "max_users": 8192,
-  "max_items": 16384,
-  "max_review_records": 40000000,
+  "max_users": 12288,
+  "max_items": 24576,
+  "max_review_records": 50000000,
   ...
 }
 Run root: /kaggle/working/masi_artifacts/outputs/amazon_csj_full_dataset_kaggle_long_safe_train
+Restored: /kaggle/input/<reattached-resume-bundle-or-zip>
+Continue: True
 ```
 
 After the dataset validation cell:
@@ -231,10 +237,11 @@ smoke run:
 {
   "mlm_status": "trained",
   "generative_finetuning_status": "trained",
-  "num_items": "... should be up to about 8192 after modality filtering ...",
+  "num_items": "... should be up to about 24576 after modality filtering ...",
   "num_train_examples": "... should be much larger than 9585 ...",
-  "mlm_loss_history": ["five epoch values"],
-  "autoregressive_loss_history": ["fifteen epoch values"],
+  "restored_checkpoint_paths": {"...": "... when a resume bundle was attached ..."},
+  "mlm_loss_history": ["ten continuation epoch values"],
+  "autoregressive_loss_history": ["thirty continuation epoch values"],
   "warm_metrics": {
     "hr@10": "...",
     "ndcg@10": "...",

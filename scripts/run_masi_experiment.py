@@ -21,7 +21,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from masi.common.checkpoints import StepCheckpointManager
+from masi.common.checkpoints import StepCheckpointManager, find_stage_resume_checkpoint, load_checkpoint_payload
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
 from masi.common.toggles import MethodToggleConfig
@@ -78,6 +78,41 @@ def _optional_positive_int(value: object) -> int | None:
         return None
     parsed = int(value)
     return parsed if parsed > 0 else None
+
+
+def _resolve_checkpoint_root(raw_checkpoint_root: object, *, repo_root: Path) -> Path | None:
+    """Resolve checkpoint roots without prefixing already-absolute paths."""
+
+    if not raw_checkpoint_root:
+        return None
+    checkpoint_root = Path(str(raw_checkpoint_root)).expanduser()
+    return ensure_directory(checkpoint_root if checkpoint_root.is_absolute() else repo_root / checkpoint_root)
+
+
+def _move_optimizer_state_to_device(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
+    """Move optimizer state tensors after loading CPU checkpoint payloads."""
+
+    for state in optimizer.state.values():
+        for key, value in list(state.items()):
+            if torch.is_tensor(value):
+                state[key] = value.to(device)
+
+
+def _load_compatible_model_state(model: torch.nn.Module, state_dict: object) -> dict[str, object]:
+    """Load matching checkpoint tensors and report skipped keys."""
+
+    if not isinstance(state_dict, dict) or not state_dict:
+        return {"loaded_keys": 0, "skipped_keys": []}
+    current_state = model.state_dict()
+    compatible = {
+        key: value
+        for key, value in state_dict.items()
+        if key in current_state and current_state[key].shape == value.shape
+    }
+    skipped = sorted(key for key in state_dict if key not in compatible)
+    current_state.update(compatible)
+    model.load_state_dict(current_state)
+    return {"loaded_keys": len(compatible), "skipped_keys": skipped[:20], "skipped_key_count": len(skipped)}
 
 
 def _prepare_inputs(
@@ -153,13 +188,34 @@ def main() -> None:
     toggle_state = asdict(toggles)
     device = _select_device()
     checkpointing_config = dict(config.get("checkpointing", {}))
-    checkpoint_root = config.get("checkpoint_root")
-    resolved_checkpoint_root = ensure_directory(repo_root / str(checkpoint_root)) if checkpoint_root else None
+    resolved_checkpoint_root = _resolve_checkpoint_root(config.get("checkpoint_root"), repo_root=repo_root)
     checkpoint_keep_last = (
         2
         if checkpointing_config.get("keep_last") is None
         else _optional_positive_int(checkpointing_config.get("keep_last"))
     )
+    restore_from_checkpoints = bool(checkpointing_config.get("restore_from_checkpoints", False))
+    restored_checkpoint_paths: dict[str, str] = {}
+    restore_reports: dict[str, dict[str, object]] = {}
+
+    def _load_resume_payload(
+        *,
+        stage_name: str,
+        final_checkpoint_name: str,
+        step_stage_name: str,
+    ) -> dict[str, object] | None:
+        if not restore_from_checkpoints or resolved_checkpoint_root is None:
+            return None
+        checkpoint_path = find_stage_resume_checkpoint(
+            checkpoint_root=resolved_checkpoint_root,
+            final_checkpoint_name=final_checkpoint_name,
+            step_stage_name=step_stage_name,
+        )
+        if checkpoint_path is None:
+            return None
+        payload = load_checkpoint_payload(checkpoint_path, map_location="cpu")
+        restored_checkpoint_paths[stage_name] = str(checkpoint_path)
+        return payload
 
     fused_ids, user_histories, import_summary = _prepare_inputs(config=config, toggles=toggles)
     vocabulary = TokenVocabulary.build(
@@ -236,6 +292,21 @@ def main() -> None:
         **common_model_args,
         max_sequence_length=mlm_max_tokens,
     ).to(device)
+    mlm_resume_payload = _load_resume_payload(
+        stage_name="cross_modal_mlm",
+        final_checkpoint_name="cross_modal_mlm.pt",
+        step_stage_name="cross_modal_mlm_steps",
+    )
+    generative_resume_payload = _load_resume_payload(
+        stage_name="generative_recommender",
+        final_checkpoint_name="generative_recommender.pt",
+        step_stage_name="generative_recommender_steps",
+    )
+    if mlm_resume_payload is not None:
+        restore_reports["cross_modal_mlm"] = _load_compatible_model_state(
+            mlm_model,
+            mlm_resume_payload.get("model_state_dict"),
+        )
 
     mlm_checkpoint_manager = (
         StepCheckpointManager(
@@ -279,6 +350,12 @@ def main() -> None:
     mlm_history: list[float] = []
     if toggles.use_cross_modal_mlm and len(mlm_dataset) > 0:
         mlm_optimizer = torch.optim.AdamW(mlm_model.parameters(), lr=float(config["learning_rate"]))
+        if mlm_resume_payload is not None and mlm_resume_payload.get("optimizer_state_dict"):
+            try:
+                mlm_optimizer.load_state_dict(mlm_resume_payload["optimizer_state_dict"])
+                _move_optimizer_state_to_device(mlm_optimizer, device)
+            except ValueError as exc:
+                restore_reports.setdefault("cross_modal_mlm", {})["optimizer_restore_warning"] = str(exc)
         mlm_history = run_training_epochs(
             model=mlm_model,
             optimizer=mlm_optimizer,
@@ -290,7 +367,16 @@ def main() -> None:
             epochs=int(config["mlm_epochs"]),
             device=device,
             checkpoint_callback=_mlm_checkpoint_callback,
+            initial_global_step=int(mlm_resume_payload.get("global_step", 0))
+            if mlm_resume_payload else 0,
         )
+
+    if generative_resume_payload is not None:
+        restore_reports["generative_recommender"] = _load_compatible_model_state(
+            generative_model,
+            generative_resume_payload.get("model_state_dict"),
+        )
+    elif toggles.use_cross_modal_mlm and len(mlm_dataset) > 0:
         initialize_generative_from_mlm(
             generative_model=generative_model,
             mlm_model=mlm_model,
@@ -340,6 +426,12 @@ def main() -> None:
     generative_history: list[float] = []
     if toggles.use_generative_finetuning and len(train_dataset) > 0:
         generative_optimizer = torch.optim.AdamW(generative_model.parameters(), lr=float(config["learning_rate"]))
+        if generative_resume_payload is not None and generative_resume_payload.get("optimizer_state_dict"):
+            try:
+                generative_optimizer.load_state_dict(generative_resume_payload["optimizer_state_dict"])
+                _move_optimizer_state_to_device(generative_optimizer, device)
+            except ValueError as exc:
+                restore_reports.setdefault("generative_recommender", {})["optimizer_restore_warning"] = str(exc)
         class _AutoregressiveLoader:
             def __len__(self_nonlocal):
                 return len(train_loader)
@@ -368,6 +460,8 @@ def main() -> None:
             epochs=int(config["autoregressive_epochs"]),
             device=device,
             checkpoint_callback=_generative_checkpoint_callback,
+            initial_global_step=int(generative_resume_payload.get("global_step", 0))
+            if generative_resume_payload else 0,
         )
 
     checkpoint_paths: dict[str, str] = {}
@@ -405,6 +499,8 @@ def main() -> None:
                 "mlm_loss_history": mlm_history,
                 "autoregressive_loss_history": generative_history,
                 "checkpoint_paths": checkpoint_paths,
+                "restored_checkpoint_paths": restored_checkpoint_paths,
+                "restore_reports": restore_reports,
             },
             resolved_checkpoint_root / "training_artifact_summary.json",
         )
@@ -503,6 +599,8 @@ def main() -> None:
         "sample_generation": sample_generation,
         "import_summary": import_summary,
         "checkpoint_paths": checkpoint_paths,
+        "restored_checkpoint_paths": restored_checkpoint_paths,
+        "restore_reports": restore_reports,
         "periodic_checkpoint_dirs": periodic_checkpoint_dirs,
         "periodic_latest_checkpoint_paths": periodic_latest_checkpoint_paths,
     }

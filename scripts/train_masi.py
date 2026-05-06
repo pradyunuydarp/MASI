@@ -283,15 +283,16 @@ def main() -> None:
     token_summary_path = token_outputs_root / "masi_token_summary.json"
     experiment_summary_path = experiment_outputs_root / "experiment_summary.json"
     resume_if_artifacts_exist = bool(runtime_config.get("resume_if_artifacts_exist", True))
+    continue_from_checkpoints = bool(dict(config.get("checkpointing", {})).get("restore_from_checkpoints", False))
 
-    if args.force or not (resume_if_artifacts_exist and token_summary_path.exists()):
+    if args.force or continue_from_checkpoints or not (resume_if_artifacts_exist and token_summary_path.exists()):
         _run_python_script(
             repo_root=repo_root,
             script_path=repo_root / "scripts" / "build_masi_tokens.py",
             arguments=["--config", str(token_config_path)],
         )
 
-    if args.force or not (resume_if_artifacts_exist and experiment_summary_path.exists()):
+    if args.force or continue_from_checkpoints or not (resume_if_artifacts_exist and experiment_summary_path.exists()):
         _run_python_script(
             repo_root=repo_root,
             script_path=repo_root / "scripts" / "run_masi_experiment.py",

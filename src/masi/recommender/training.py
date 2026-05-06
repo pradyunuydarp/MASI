@@ -74,12 +74,13 @@ def run_training_epochs(
     epochs: int,
     device: torch.device,
     checkpoint_callback: Callable[..., object] | None = None,
+    initial_global_step: int = 0,
 ) -> list[float]:
     """Train a model for multiple epochs and return mean epoch losses."""
 
     epoch_losses: list[float] = []
     model.to(device)
-    global_step = 0
+    global_step = max(0, int(initial_global_step))
     steps_per_epoch = len(data_loader) if hasattr(data_loader, "__len__") else 0
     total_steps = epochs * steps_per_epoch
     progress_desc = f"Phase 3 {objective}"

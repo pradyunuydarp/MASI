@@ -23,7 +23,7 @@ Current Kaggle-safe profile support:
 
 - `smoke_safe`: preserves the previously validated bounded run used by the saved Kaggle output notebook.
 - `scaled_safe`: the previously completed metric-improvement profile, still bounded because CLIP embeddings are kept in memory.
-- `long_safe`: the next recommended metric-improvement profile, targeting roughly a 5-6 hour Kaggle session.
+- `long_safe`: the recommended continuation metric-improvement profile; it now restores the previous bundle and runs a larger bounded slice.
 
 Previously observed `smoke_safe` caps:
 
@@ -57,24 +57,24 @@ Completed `scaled_safe` caps:
 - `experiment.num_heads = 8`
 - `experiment.num_layers = 4`
 
-Current recommended `long_safe` caps:
+Current recommended `long_safe` continuation caps:
 
-- `max_users = 8192`
-- `max_items = 16384`
-- `max_review_records = 40_000_000`
+- `max_users = 12288`
+- `max_items = 24576`
+- `max_review_records = 50_000_000`
 - `clip.batch_size = 16`
 - `alignment.batch_size = 256`
-- `alignment.epochs = 8`
+- `alignment.epochs = 10`
 - `alignment.learning_rate = 0.0004`
 - `alignment.hard_negative_count = 24`
 - `alignment.window_size = 4`
 - `tokenization.batch_size = 256`
-- `tokenization.epochs = 25`
+- `tokenization.epochs = 30`
 - `tokenization.learning_rate = 0.0004`
 - `experiment.batch_size = 32`
 - `experiment.history_max_tokens = 160`
-- `experiment.mlm_epochs = 8`
-- `experiment.autoregressive_epochs = 25`
+- `experiment.mlm_epochs = 10`
+- `experiment.autoregressive_epochs = 30`
 - `experiment.learning_rate = 0.00025`
 - `experiment.hidden_dim = 256`
 - `experiment.num_heads = 8`
@@ -83,6 +83,13 @@ Current recommended `long_safe` caps:
 - `experiment.eval_candidate_batch_size = 128`
 
 Set `USE_KAGGLE_SAFE_LIMITS = False` only on a larger machine or after adding sharded CLIP embedding persistence.
+
+Resume automation added after the first scale-up pass:
+
+- `AUTO_RESTORE_RESUME_BUNDLE = True` scans attached Kaggle inputs for a previous exported zip or unzipped bundle.
+- The bundle is restored into `/kaggle/working/masi_artifacts/outputs/amazon_csj_full_dataset_kaggle_long_safe_train`.
+- The runtime config sets `checkpointing.restore_from_checkpoints = true`, so Phase 1, Phase 2, MLM, and autoregressive checkpoints are loaded before another continuation run.
+- The export cell writes `resume_bundle_manifest.json` and packages the full run root, including final checkpoints, retained periodic checkpoints, fused IDs, resolved configs, summaries, and manifests.
 
 The saved output notebook `Kaggle_interactions/masi-full-dataset.ipynb` produced warm `HR@10 = 0.08262` and cold `HR@10 = 0.0` under the `scaled_safe` profile. The older smoke-scale result was warm `HR@10 = 0.04248` and cold `HR@10 = 0.0`. See `docs/kaggle_full_dataset_scaleup_journey.md` for the interpretation and the next scale-up plan.
 

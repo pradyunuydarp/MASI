@@ -20,7 +20,7 @@ from pathlib import Path
 import torch
 
 from masi.alignment.behavior_alignment import train_behavior_aware_alignment
-from masi.common.checkpoints import StepCheckpointManager
+from masi.common.checkpoints import StepCheckpointManager, find_stage_resume_checkpoint, load_checkpoint_payload
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
 from masi.common.toggles import MethodToggleConfig
@@ -99,6 +99,15 @@ def _resolve_path_list(values: object, *, repo_root: Path) -> list[Path]:
     return resolved
 
 
+def _resolve_checkpoint_root(raw_checkpoint_root: object, *, repo_root: Path) -> Path | None:
+    """Resolve checkpoint roots without prefixing already-absolute paths."""
+
+    if not raw_checkpoint_root:
+        return None
+    checkpoint_root = Path(str(raw_checkpoint_root)).expanduser()
+    return ensure_directory(checkpoint_root if checkpoint_root.is_absolute() else repo_root / checkpoint_root)
+
+
 def main() -> None:
     """Execute the bounded MASI token-building pipeline."""
 
@@ -118,13 +127,13 @@ def main() -> None:
     checkpointing_config = dict(config.get("checkpointing", {}))
     toggles = MethodToggleConfig.from_mapping(config.get("method_toggles"))
     toggle_state = asdict(toggles)
-    checkpoint_root = config.get("checkpoint_root")
-    resolved_checkpoint_root = ensure_directory(repo_root / str(checkpoint_root)) if checkpoint_root else None
+    resolved_checkpoint_root = _resolve_checkpoint_root(config.get("checkpoint_root"), repo_root=repo_root)
     checkpoint_keep_last = (
         2
         if checkpointing_config.get("keep_last") is None
         else _optional_positive_int(checkpointing_config.get("keep_last"))
     )
+    restore_from_checkpoints = bool(checkpointing_config.get("restore_from_checkpoints", False))
 
     subset = select_real_amazon_subset(
         reviews_path=str(dataset_config["reviews_path"]),
@@ -211,6 +220,32 @@ def main() -> None:
         image_embeddings = {}
 
     checkpoint_paths: dict[str, str] = {}
+    restored_checkpoint_paths: dict[str, str] = {}
+
+    def _load_resume_payload(
+        *,
+        stage_name: str,
+        final_checkpoint_name: str,
+        step_stage_name: str,
+    ) -> dict[str, object] | None:
+        if not restore_from_checkpoints or resolved_checkpoint_root is None:
+            return None
+        checkpoint_path = find_stage_resume_checkpoint(
+            checkpoint_root=resolved_checkpoint_root,
+            final_checkpoint_name=final_checkpoint_name,
+            step_stage_name=step_stage_name,
+        )
+        if checkpoint_path is None:
+            return None
+        payload = load_checkpoint_payload(checkpoint_path, map_location="cpu")
+        restored_checkpoint_paths[stage_name] = str(checkpoint_path)
+        return payload
+
+    alignment_resume_payload = _load_resume_payload(
+        stage_name="behavior_alignment",
+        final_checkpoint_name="behavior_alignment.pt",
+        step_stage_name="behavior_alignment_steps",
+    )
     alignment_checkpoint_manager = (
         StepCheckpointManager(
             checkpoint_root=resolved_checkpoint_root,
@@ -263,6 +298,12 @@ def main() -> None:
         seed=seed,
         use_behavior_alignment=toggles.use_behavior_alignment,
         checkpoint_callback=_alignment_checkpoint_callback,
+        initial_model_state_dict=alignment_resume_payload.get("model_state_dict")
+        if alignment_resume_payload else None,
+        initial_optimizer_state_dict=alignment_resume_payload.get("optimizer_state_dict")
+        if alignment_resume_payload else None,
+        initial_global_step=int(alignment_resume_payload.get("global_step", 0))
+        if alignment_resume_payload else 0,
     )
     if resolved_checkpoint_root is not None and alignment_result.model_state_dict is not None:
         alignment_checkpoint_path = resolved_checkpoint_root / "behavior_alignment.pt"
@@ -281,6 +322,11 @@ def main() -> None:
     text_quantization = None
     image_quantization = None
     if toggles.use_text_modality:
+        text_resume_payload = _load_resume_payload(
+            stage_name="text_rqvae",
+            final_checkpoint_name="text_rqvae.pt",
+            step_stage_name="text_rqvae_steps",
+        )
         text_checkpoint_manager = (
             StepCheckpointManager(
                 checkpoint_root=resolved_checkpoint_root,
@@ -334,6 +380,12 @@ def main() -> None:
                 tokenization_config.get("refit_codebooks_with_residual_kmeans", False)
             ),
             checkpoint_callback=_text_rqvae_checkpoint_callback,
+            initial_model_state_dict=text_resume_payload.get("model_state_dict")
+            if text_resume_payload else None,
+            initial_optimizer_state_dict=text_resume_payload.get("optimizer_state_dict")
+            if text_resume_payload else None,
+            initial_global_step=int(text_resume_payload.get("global_step", 0))
+            if text_resume_payload else 0,
         )
         if resolved_checkpoint_root is not None:
             text_quantizer_checkpoint_path = resolved_checkpoint_root / "text_rqvae.pt"
@@ -350,6 +402,11 @@ def main() -> None:
     else:
         text_checkpoint_manager = None
     if toggles.use_visual_modality:
+        image_resume_payload = _load_resume_payload(
+            stage_name="vision_rqvae",
+            final_checkpoint_name="vision_rqvae.pt",
+            step_stage_name="vision_rqvae_steps",
+        )
         image_checkpoint_manager = (
             StepCheckpointManager(
                 checkpoint_root=resolved_checkpoint_root,
@@ -401,6 +458,12 @@ def main() -> None:
                 tokenization_config.get("refit_codebooks_with_residual_kmeans", False)
             ),
             checkpoint_callback=_vision_rqvae_checkpoint_callback,
+            initial_model_state_dict=image_resume_payload.get("model_state_dict")
+            if image_resume_payload else None,
+            initial_optimizer_state_dict=image_resume_payload.get("optimizer_state_dict")
+            if image_resume_payload else None,
+            initial_global_step=int(image_resume_payload.get("global_step", 0))
+            if image_resume_payload else 0,
         )
         if resolved_checkpoint_root is not None:
             image_quantizer_checkpoint_path = resolved_checkpoint_root / "vision_rqvae.pt"
@@ -483,6 +546,7 @@ def main() -> None:
         "unique_visual_code_sequences": len({tuple(fused_id.visual_codes) for fused_id in fused_ids}),
         "fused_ids_path": str(fused_ids_path),
         "checkpoint_paths": checkpoint_paths,
+        "restored_checkpoint_paths": restored_checkpoint_paths,
         "periodic_checkpoint_dirs": periodic_checkpoint_dirs,
         "periodic_latest_checkpoint_paths": periodic_latest_checkpoint_paths,
     }

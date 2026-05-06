@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any
 
@@ -90,3 +91,49 @@ class StepCheckpointManager:
             return
         for path in checkpoints[: -self.keep_last]:
             path.unlink(missing_ok=True)
+
+
+def find_stage_resume_checkpoint(
+    *,
+    checkpoint_root: Path,
+    final_checkpoint_name: str,
+    step_stage_name: str,
+) -> Path | None:
+    """Find the best checkpoint to restore for a training stage.
+
+    Completed stages prefer their final checkpoint. Interrupted stages fall back
+    to the latest retained periodic checkpoint, whose manifest may contain an
+    absolute path from the previous Kaggle session.
+    """
+
+    final_checkpoint = checkpoint_root / final_checkpoint_name
+    if final_checkpoint.exists():
+        return final_checkpoint
+
+    step_directory = checkpoint_root / step_stage_name
+    latest_manifest = step_directory / "latest.json"
+    if latest_manifest.exists():
+        with latest_manifest.open("r", encoding="utf-8") as handle:
+            latest_payload = json.load(handle)
+        raw_checkpoint_path = latest_payload.get("checkpoint_path")
+        if raw_checkpoint_path:
+            manifest_checkpoint = Path(str(raw_checkpoint_path))
+            if manifest_checkpoint.exists():
+                return manifest_checkpoint
+            sibling_checkpoint = step_directory / manifest_checkpoint.name
+            if sibling_checkpoint.exists():
+                return sibling_checkpoint
+
+    periodic_checkpoints = sorted(step_directory.glob("step_*.pt"))
+    if periodic_checkpoints:
+        return periodic_checkpoints[-1]
+    return None
+
+
+def load_checkpoint_payload(checkpoint_path: Path, *, map_location: str | torch.device = "cpu") -> dict[str, Any]:
+    """Load a checkpoint payload and validate the expected dictionary shape."""
+
+    payload = torch.load(checkpoint_path, map_location=map_location)
+    if not isinstance(payload, dict):
+        raise TypeError(f"Expected checkpoint payload dict at {checkpoint_path}, got {type(payload)!r}.")
+    return payload

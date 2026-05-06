@@ -104,6 +104,15 @@ class RQVAEModel(nn.Module):
         return reconstructed, code_indices, latent, quantized
 
 
+def _move_optimizer_state_to_device(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
+    """Move optimizer state tensors after loading a CPU checkpoint payload."""
+
+    for state in optimizer.state.values():
+        for key, value in list(state.items()):
+            if torch.is_tensor(value):
+                state[key] = value.to(device)
+
+
 def _fit_kmeans(
     *,
     data: torch.Tensor,
@@ -192,6 +201,9 @@ def train_rqvae_model(
     seed: int,
     refit_codebooks_with_residual_kmeans: bool = False,
     checkpoint_callback: Callable[..., object] | None = None,
+    initial_model_state_dict: dict[str, object] | None = None,
+    initial_optimizer_state_dict: dict[str, object] | None = None,
+    initial_global_step: int = 0,
 ) -> tuple[RQVAEModel, QuantizationResult]:
     """Train an RQ-VAE-style model on one modality's aligned embeddings."""
 
@@ -204,10 +216,15 @@ def train_rqvae_model(
         depth=depth,
         codebook_size=codebook_size,
     ).to(device)
+    if initial_model_state_dict:
+        model.load_state_dict(initial_model_state_dict)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    if initial_optimizer_state_dict:
+        optimizer.load_state_dict(initial_optimizer_state_dict)
+        _move_optimizer_state_to_device(optimizer, device)
     generator = torch.Generator().manual_seed(seed)
     loss_history: list[float] = []
-    global_step = 0
+    global_step = max(0, int(initial_global_step))
 
     batches_per_epoch = (data.size(0) + batch_size - 1) // batch_size
     total_steps = epochs * batches_per_epoch
