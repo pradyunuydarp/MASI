@@ -71,6 +71,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [notebooks/08_full_dataset_pipeline.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/08_full_dataset_pipeline.ipynb), [Kaggle_interactions/masi-full-dataset.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/Kaggle_interactions/masi-full-dataset.ipynb), [docs/kaggle_full_dataset_scaleup_journey.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/kaggle_full_dataset_scaleup_journey.md), [docs/Kaggle_Notebook_logs.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/Kaggle_Notebook_logs.md), [README.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/README.md)
 - `DONE` Reserve a repo-local `Colab_interactions/` workspace for transient Colab-side files and keep all contents untracked.
   Artifact: `.gitignore`, `Colab_interactions/`
+- `DONE` Add central GPU/MPS/CPU runtime selection and remove major per-step CPU bottlenecks from Phase 1, Phase 2, and Phase 3 training.
+  Artifact: [src/masi/common/runtime.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/common/runtime.py), [src/masi/alignment/behavior_alignment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/alignment/behavior_alignment.py), [src/masi/tokenization/rqvae.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/tokenization/rqvae.py), [src/masi/tokenization/masi_tokens.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/tokenization/masi_tokens.py), [src/masi/recommender/training.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/recommender/training.py), [scripts/build_masi_tokens.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/build_masi_tokens.py), [scripts/run_masi_experiment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/run_masi_experiment.py), `configs/*.json`, [README.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/README.md). CPU remains intentional for data ingestion/filtering, PIL image decode, hard-negative ID sampling, final CPU artifact writes, and ranking list sorting.
 
 ## Phase 0: Proposal-To-Codebase Translation
 
@@ -95,6 +97,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [src/masi/tokenization/masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/masi_tokens.py), [scripts/build_masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/scripts/build_masi_tokens.py)
 - `DONE` Implement CLIP image embedding extraction for the bounded MASI token pipeline.
   Artifact: [src/masi/tokenization/masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/masi_tokens.py), [src/masi/data/amazon_csj_assets.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/data/amazon_csj_assets.py), [scripts/build_masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/scripts/build_masi_tokens.py)
+- `DONE` Move CLIP model and processor tensors through the central runtime device path while keeping final cached embeddings on CPU for memory safety.
+  Artifact: [src/masi/common/runtime.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/common/runtime.py), [src/masi/tokenization/masi_tokens.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/tokenization/masi_tokens.py), `configs/*.json`
 - `IN_PROGRESS` Persist extracted preprocessing artifacts in a reproducible format with split metadata.
   Current artifact: filtered JSONL tables and dataset manifest for the demo run under `data/processed/demo/` and `outputs/demo/`.
 - `DONE` Add real Amazon CSJ training configs for smoke and full proposal-aligned runs.
@@ -129,6 +133,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [src/masi/alignment/behavior_alignment.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/alignment/behavior_alignment.py), [src/masi/tokenization/masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/masi_tokens.py)
 - `DONE` Train the projection heads with separate `Lvis` and `Ltxt` InfoNCE losses.
   Artifact: [scripts/build_masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/scripts/build_masi_tokens.py), [outputs/masi_tokens_amazon_csj_demo/masi_token_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/masi_token_summary.json)
+- `DONE` Pack Phase 1 text/image embeddings into dense device tensors and train from item row-index tensors instead of per-step dictionary stacking.
+  Artifact: [src/masi/alignment/behavior_alignment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/alignment/behavior_alignment.py), [scripts/build_masi_tokens.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/build_masi_tokens.py), `alignment.keep_embeddings_on_device` in `configs/*.json`
 - `TODO` Evaluate whether projected embeddings improve behavioral clustering for warm items.
 - `TODO` Define the cold-start inference path for items without interaction edges.
 
@@ -148,6 +154,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl)
 - `DONE` Implement late fusion with `[TXT]` and `[VIS]` modality markers.
   Artifact: [src/masi/tokenization/masi_tokens.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/tokenization/masi_tokens.py), [outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl)
+- `DONE` Keep RQ-VAE embedding matrices, trainable quantizers, optimizer state, final quantization, and residual k-means tensors on the selected device when possible.
+  Artifact: [src/masi/tokenization/rqvae.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/tokenization/rqvae.py), [scripts/build_masi_tokens.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/build_masi_tokens.py)
 - `TODO` Validate that modality-specific codebooks reduce collisions for visually distinct items with similar text.
 
 ## Phase 4: Recommender-Side Cross-Modal Alignment
@@ -166,6 +174,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: MLM and autoregressive loss curves plus ranking metrics in [outputs/masi_experiment_amazon_csj_demo/experiment_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_experiment_amazon_csj_demo/experiment_summary.json)
 - `DONE` Enable Apple Silicon GPU acceleration for Phase 3 MLM pretraining and generative ranking.
   Artifact: [src/masi/recommender/mlm.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/mlm.py), [src/masi/recommender/generative.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/generative.py), [scripts/run_masi_experiment.py](/Users/pradyundevarakonda/Developer/MASI/scripts/run_masi_experiment.py), [outputs/masi_experiment_amazon_csj_demo/experiment_summary.json](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_experiment_amazon_csj_demo/experiment_summary.json)
+- `DONE` Route Phase 3 MLM, autoregressive fine-tuning, evaluation scoring batches, optimizer restores, and CPU-portable checkpoint writes through the central runtime device utilities.
+  Artifact: [src/masi/common/runtime.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/common/runtime.py), [src/masi/recommender/training.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/recommender/training.py), [scripts/run_masi_experiment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/run_masi_experiment.py)
 - `DONE` Replace synthetic fused semantic IDs with real Phase 2 outputs for the bounded Amazon MASI token build.
   Artifact: [outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl](/Users/pradyundevarakonda/Developer/MASI/outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl), [configs/recommender_amazon_csj_demo.json](/Users/pradyundevarakonda/Developer/MASI/configs/recommender_amazon_csj_demo.json)
 - `DONE` Wire leave-one-out warm-start and zero-shot splits into the recommender datasets and training loop.

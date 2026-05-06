@@ -14,9 +14,19 @@
     "item_col": "item_id",
     "rating_col": "rating",
     "timestamp_col": "timestamp",
-    "text_fields": ["title", "brand", "category"],
-    "image_fields": ["image_url"],
+    "text_fields": [
+      "title",
+      "brand",
+      "category"
+    ],
+    "image_fields": [
+      "image_url"
+    ],
     "min_user_interactions": 2,
     "min_item_interactions": 2
+  },
+  "runtime": {
+    "device": "auto",
+    "log_device_summary": true
   }
 }

@@ -24,6 +24,7 @@ from torch.utils.data import DataLoader
 
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
+from masi.common.runtime import resolve_torch_device
 from masi.common.toggles import MethodToggleConfig
 from masi.recommender.amazon_data import build_real_amazon_histories
 from masi.recommender.evaluation import build_leave_one_out_split
@@ -58,16 +59,6 @@ def _load_config(config_path: str) -> tuple[dict[str, object], Path]:
     loaded = load_json_config(config_path)
     repo_root = find_repo_root(Path(__file__))
     return loaded.data, repo_root
-
-
-def _select_device() -> torch.device:
-    """Select the best available PyTorch device for Phase 3 demos."""
-
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
 
 
 def _prepare_tensors(
@@ -186,7 +177,7 @@ def main() -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    device = _select_device()
+    device = resolve_torch_device(dict(config.get("runtime", {})))
 
     vocabulary, generative_loader, mlm_loader, user_histories, import_summary, resolved_budgets = _prepare_tensors(config)
 
@@ -218,7 +209,7 @@ def main() -> None:
             dropout=float(config["dropout"]),
             pad_token_id=0,
         )
-    )
+    ).to(device)
 
     generative_optimizer = torch.optim.AdamW(generative_model.parameters(), lr=float(config["learning_rate"]))
     mlm_optimizer = torch.optim.AdamW(mlm_model.parameters(), lr=float(config["learning_rate"]))
@@ -255,7 +246,7 @@ def main() -> None:
         encoded = [item_id_lookup[item_id] for item_id in history]
         padded = encoded + [0] * (4 - len(encoded))
         sasrec_sequence_batch.append(padded[:4])
-    sasrec_logits = sasrec_model(torch.tensor(sasrec_sequence_batch, dtype=torch.long))
+    sasrec_logits = sasrec_model(torch.tensor(sasrec_sequence_batch, dtype=torch.long, device=device))
 
     outputs_root = ensure_directory(repo_root / str(config["outputs_root"]))
     summary = {
@@ -268,7 +259,7 @@ def main() -> None:
         "num_mlm_examples": len(mlm_loader.dataset),
         "autoregressive_loss": generative_loss,
         "mlm_loss": mlm_loss,
-        "sasrec_output_shape": list(sasrec_logits.shape),
+        "sasrec_output_shape": list(sasrec_logits.detach().cpu().shape),
         "special_tokens": vocabulary.decode(list(range(len(vocabulary.token_to_id)))[:7]),
         "import_summary": import_summary,
     }

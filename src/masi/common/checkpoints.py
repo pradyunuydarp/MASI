@@ -10,6 +10,7 @@ from typing import Any
 import torch
 
 from masi.common.io import ensure_directory, write_json
+from masi.common.runtime import object_to_cpu
 
 
 @dataclass(slots=True)
@@ -57,7 +58,7 @@ class StepCheckpointManager:
         """Persist a checkpoint immediately and update the stage manifest."""
 
         checkpoint_path = self.stage_directory / f"step_{global_step:07d}.pt"
-        torch.save(payload, checkpoint_path)
+        torch.save(object_to_cpu(payload), checkpoint_path)
         write_json(
             {
                 "global_step": global_step,

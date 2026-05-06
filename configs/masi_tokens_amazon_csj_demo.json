@@ -27,7 +27,8 @@
     "temperature": 0.07,
     "hard_negative_count": 4,
     "window_size": 2,
-    "dropout": 0.1
+    "dropout": 0.1,
+    "keep_embeddings_on_device": true
   },
   "tokenization": {
     "latent_dim": 128,
@@ -40,5 +41,9 @@
     "refit_codebooks_with_residual_kmeans": true
   },
   "outputs_root": "outputs/masi_tokens_amazon_csj_demo",
-  "fused_ids_path": "outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl"
+  "fused_ids_path": "outputs/masi_tokens_amazon_csj_demo/fused_semantic_ids.jsonl",
+  "runtime": {
+    "device": "auto",
+    "log_device_summary": true
+  }
 }

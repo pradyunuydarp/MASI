@@ -1,6 +1,8 @@
 {
   "seed": 7,
   "runtime": {
+    "device": "auto",
+    "log_device_summary": true,
     "run_name": "amazon_csj_full_dataset_train",
     "resume_if_artifacts_exist": true,
     "download_reviews_if_missing": false,
@@ -10,7 +12,9 @@
   "dataset": {
     "reviews_path": "data/full_dataset/Clothing_Shoes_and_Jewelry.jsonl",
     "metadata_path": "data/full_dataset/meta_Clothing_Shoes_and_Jewelry.jsonl",
-    "kaggle_input_slugs": ["masi-amazon-csj-full-dataset"],
+    "kaggle_input_slugs": [
+      "masi-amazon-csj-full-dataset"
+    ],
     "reviews_relpath": "Clothing_Shoes_and_Jewelry.jsonl",
     "metadata_relpath": "meta_Clothing_Shoes_and_Jewelry.jsonl",
     "min_user_interactions": 5,
@@ -43,7 +47,8 @@
     "temperature": 0.07,
     "hard_negative_count": 8,
     "window_size": 2,
-    "dropout": 0.1
+    "dropout": 0.1,
+    "keep_embeddings_on_device": true
   },
   "tokenization": {
     "latent_dim": 192,

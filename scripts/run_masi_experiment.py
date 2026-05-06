@@ -24,6 +24,13 @@ from torch.utils.data import DataLoader
 from masi.common.checkpoints import StepCheckpointManager, find_stage_resume_checkpoint, load_checkpoint_payload
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
+from masi.common.runtime import (
+    clear_device_cache,
+    module_state_dict_to_cpu,
+    move_optimizer_state_to_device,
+    optimizer_state_dict_to_cpu,
+    resolve_torch_device,
+)
 from masi.common.toggles import MethodToggleConfig
 from masi.recommender.amazon_data import build_real_amazon_histories
 from masi.recommender.evaluation import build_leave_one_out_split, evaluate_generative_ranking
@@ -61,16 +68,6 @@ def _load_config(config_path: str) -> tuple[dict[str, object], Path]:
     return loaded.data, repo_root
 
 
-def _select_device() -> torch.device:
-    """Select the best available PyTorch device."""
-
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
-
-
 def _optional_positive_int(value: object) -> int | None:
     """Convert JSON values into optional positive integer limits."""
 
@@ -87,15 +84,6 @@ def _resolve_checkpoint_root(raw_checkpoint_root: object, *, repo_root: Path) ->
         return None
     checkpoint_root = Path(str(raw_checkpoint_root)).expanduser()
     return ensure_directory(checkpoint_root if checkpoint_root.is_absolute() else repo_root / checkpoint_root)
-
-
-def _move_optimizer_state_to_device(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
-    """Move optimizer state tensors after loading CPU checkpoint payloads."""
-
-    for state in optimizer.state.values():
-        for key, value in list(state.items()):
-            if torch.is_tensor(value):
-                state[key] = value.to(device)
 
 
 def _load_compatible_model_state(model: torch.nn.Module, state_dict: object) -> dict[str, object]:
@@ -186,7 +174,8 @@ def main() -> None:
         torch.cuda.manual_seed_all(seed)
     toggles = MethodToggleConfig.from_mapping(config.get("method_toggles"))
     toggle_state = asdict(toggles)
-    device = _select_device()
+    runtime_config = dict(config.get("runtime", {}))
+    device = resolve_torch_device(runtime_config)
     checkpointing_config = dict(config.get("checkpointing", {}))
     resolved_checkpoint_root = _resolve_checkpoint_root(config.get("checkpoint_root"), repo_root=repo_root)
     checkpoint_keep_last = (
@@ -337,8 +326,8 @@ def main() -> None:
                 "config": config,
                 "method_toggles": toggle_state,
                 "objective": objective,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
+                "model_state_dict": module_state_dict_to_cpu(model),
+                "optimizer_state_dict": optimizer_state_dict_to_cpu(optimizer),
                 "vocabulary": vocabulary.token_to_id,
                 "global_step": global_step,
                 "epoch_index": epoch_index,
@@ -353,7 +342,7 @@ def main() -> None:
         if mlm_resume_payload is not None and mlm_resume_payload.get("optimizer_state_dict"):
             try:
                 mlm_optimizer.load_state_dict(mlm_resume_payload["optimizer_state_dict"])
-                _move_optimizer_state_to_device(mlm_optimizer, device)
+                move_optimizer_state_to_device(mlm_optimizer, device)
             except ValueError as exc:
                 restore_reports.setdefault("cross_modal_mlm", {})["optimizer_restore_warning"] = str(exc)
         mlm_history = run_training_epochs(
@@ -412,8 +401,8 @@ def main() -> None:
                 "config": config,
                 "method_toggles": toggle_state,
                 "objective": objective,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
+                "model_state_dict": module_state_dict_to_cpu(model),
+                "optimizer_state_dict": optimizer_state_dict_to_cpu(optimizer),
                 "vocabulary": vocabulary.token_to_id,
                 "item_tokens": item_tokens,
                 "global_step": global_step,
@@ -429,7 +418,7 @@ def main() -> None:
         if generative_resume_payload is not None and generative_resume_payload.get("optimizer_state_dict"):
             try:
                 generative_optimizer.load_state_dict(generative_resume_payload["optimizer_state_dict"])
-                _move_optimizer_state_to_device(generative_optimizer, device)
+                move_optimizer_state_to_device(generative_optimizer, device)
             except ValueError as exc:
                 restore_reports.setdefault("generative_recommender", {})["optimizer_restore_warning"] = str(exc)
         class _AutoregressiveLoader:
@@ -471,7 +460,7 @@ def main() -> None:
             {
                 "config": config,
                 "method_toggles": toggle_state,
-                "model_state_dict": generative_model.state_dict(),
+                "model_state_dict": module_state_dict_to_cpu(generative_model),
                 "vocabulary": vocabulary.token_to_id,
                 "item_tokens": item_tokens,
             },
@@ -485,7 +474,7 @@ def main() -> None:
                 {
                     "config": config,
                     "method_toggles": toggle_state,
-                    "model_state_dict": mlm_model.state_dict(),
+                    "model_state_dict": module_state_dict_to_cpu(mlm_model),
                     "vocabulary": vocabulary.token_to_id,
                 },
                 mlm_checkpoint_path,
@@ -505,6 +494,13 @@ def main() -> None:
             resolved_checkpoint_root / "training_artifact_summary.json",
         )
         checkpoint_paths["training_artifact_summary"] = str(training_artifact_summary_path)
+
+    if "mlm_optimizer" in locals():
+        del mlm_optimizer
+    if "generative_optimizer" in locals():
+        del generative_optimizer
+    del mlm_model
+    clear_device_cache(device)
 
     candidate_item_ids = sorted(item_tokens)
     top_k = int(config["top_k"])
@@ -582,6 +578,7 @@ def main() -> None:
     summary = {
         "seed": seed,
         "device": str(device),
+        "runtime": runtime_config,
         "method_toggles": asdict(toggles),
         "resolved_target_max_tokens": target_max_tokens,
         "resolved_mlm_max_tokens": mlm_max_tokens,

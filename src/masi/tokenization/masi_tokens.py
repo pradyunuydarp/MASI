@@ -11,17 +11,14 @@ from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
 
 from masi.common.progress import make_progress_bar
+from masi.common.runtime import select_torch_device
 from masi.recommender.vocabulary import FusedSemanticId
 
 
-def select_device() -> torch.device:
-    """Choose the best available device for local CLIP and quantizer runs."""
+def select_device(runtime_config: dict[str, object] | None = None) -> torch.device:
+    """Backward-compatible wrapper around the central MASI device selector."""
 
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+    return select_torch_device(runtime_config)
 
 
 def build_text_input(metadata_record: dict[str, object]) -> str:
@@ -87,6 +84,19 @@ def _resolve_clip_model_source(model_name: str) -> str:
     return configured
 
 
+def _move_processor_batch_to_device(
+    batch: dict[str, torch.Tensor],
+    device: torch.device,
+) -> dict[str, torch.Tensor]:
+    """Move a processor output batch to the selected device efficiently."""
+
+    non_blocking = device.type == "cuda"
+    return {
+        key: value.to(device=device, non_blocking=non_blocking)
+        for key, value in batch.items()
+    }
+
+
 def encode_clip_embeddings(
     *,
     metadata_by_item: dict[str, dict[str, object]],
@@ -140,15 +150,17 @@ def encode_clip_embeddings(
             if use_text_modality:
                 text_inputs = [build_text_input(metadata_by_item[item_id]) for item_id in batch_item_ids]
                 text_batch = processor(text=text_inputs, return_tensors="pt", padding=True, truncation=True)
-                text_batch = {key: value.to(device) for key, value in text_batch.items()}
+                text_batch = _move_processor_batch_to_device(text_batch, device)
                 batch_text_embeddings = _unwrap_clip_output(model.get_text_features(**text_batch))
                 batch_text_embeddings = torch.nn.functional.normalize(batch_text_embeddings, dim=-1).cpu()
+                del text_batch
             if use_visual_modality:
                 images = [Image.open(image_paths_by_item[item_id]).convert("RGB") for item_id in batch_item_ids]
                 image_batch = processor(images=images, return_tensors="pt")
-                image_batch = {key: value.to(device) for key, value in image_batch.items()}
+                image_batch = _move_processor_batch_to_device(image_batch, device)
                 batch_image_embeddings = _unwrap_clip_output(model.get_image_features(**image_batch))
                 batch_image_embeddings = torch.nn.functional.normalize(batch_image_embeddings, dim=-1).cpu()
+                del image_batch
 
             for index, item_id in enumerate(batch_item_ids):
                 # Embeddings are cached in dictionaries keyed by item ID because
@@ -159,6 +171,7 @@ def encode_clip_embeddings(
                     image_embeddings[item_id] = batch_image_embeddings[index]
                 if images:
                     images[index].close()
+            images.clear()
             progress.set_postfix(
                 {
                     "items": min(start + len(batch_item_ids), len(valid_item_ids)),

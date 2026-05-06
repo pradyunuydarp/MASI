@@ -20,6 +20,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from masi.common.progress import make_progress_bar
+from masi.common.runtime import move_optimizer_state_to_device
 
 
 @dataclass(slots=True)
@@ -102,15 +103,6 @@ class RQVAEModel(nn.Module):
         quantized, code_indices = self.quantizer(latent)
         reconstructed = self.decoder(quantized)
         return reconstructed, code_indices, latent, quantized
-
-
-def _move_optimizer_state_to_device(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
-    """Move optimizer state tensors after loading a CPU checkpoint payload."""
-
-    for state in optimizer.state.values():
-        for key, value in list(state.items()):
-            if torch.is_tensor(value):
-                state[key] = value.to(device)
 
 
 def _fit_kmeans(
@@ -208,7 +200,14 @@ def train_rqvae_model(
     """Train an RQ-VAE-style model on one modality's aligned embeddings."""
 
     item_ids = sorted(embeddings_by_item)
-    data = torch.stack([embeddings_by_item[item_id] for item_id in item_ids])
+    data = torch.stack(
+        [
+            embeddings_by_item[item_id].detach().to(dtype=torch.float32, device="cpu")
+            for item_id in item_ids
+        ],
+        dim=0,
+    ).contiguous()
+    data = data.to(device=device, non_blocking=device.type == "cuda")
     input_dim = data.shape[1]
     model = RQVAEModel(
         input_dim=input_dim,
@@ -221,7 +220,7 @@ def train_rqvae_model(
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     if initial_optimizer_state_dict:
         optimizer.load_state_dict(initial_optimizer_state_dict)
-        _move_optimizer_state_to_device(optimizer, device)
+        move_optimizer_state_to_device(optimizer, device)
     generator = torch.Generator().manual_seed(seed)
     loss_history: list[float] = []
     global_step = max(0, int(initial_global_step))
@@ -231,13 +230,15 @@ def train_rqvae_model(
     with make_progress_bar(total=total_steps, desc="RQ-VAE train") as progress:
         for epoch_index in range(epochs):
             permutation = torch.randperm(data.size(0), generator=generator)
-            shuffled = data[permutation]
+            if device.type != "cpu":
+                permutation = permutation.to(device=device, non_blocking=device.type == "cuda")
 
-            for batch_index, start in enumerate(range(0, shuffled.size(0), batch_size), start=1):
+            for batch_index, start in enumerate(range(0, data.size(0), batch_size), start=1):
                 # The learned encoder/decoder pair gives the quantizer a smoother
                 # latent space before we freeze the final code assignments with the
                 # residual k-means fit below.
-                batch = shuffled[start : start + batch_size].to(device)
+                batch_indices = permutation[start : start + batch_size]
+                batch = data.index_select(0, batch_indices)
                 optimizer.zero_grad()
                 reconstructed, _, latent, quantized = model(batch)
                 reconstruction_loss = F.mse_loss(reconstructed, batch)
@@ -266,7 +267,7 @@ def train_rqvae_model(
                 progress.update(1)
 
     with torch.no_grad():
-        latent_data = model.encoder(data.to(device))
+        latent_data = model.encoder(data)
         if refit_codebooks_with_residual_kmeans:
             # This fallback is intentionally opt-in. It can help tiny
             # development subsets avoid degenerate assignments, but it is not

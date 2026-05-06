@@ -18,6 +18,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from masi.common.progress import make_progress_bar
+from masi.common.runtime import module_state_dict_to_cpu, move_optimizer_state_to_device
 
 
 @dataclass(slots=True)
@@ -109,13 +110,90 @@ class BehaviorAwareAlignmentModel(nn.Module):
         self.image_head = ProjectionHead(input_dim, projection_dim, dropout)
 
 
-def _move_optimizer_state_to_device(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
-    """Move optimizer state tensors after loading a CPU checkpoint payload."""
+def _pack_embeddings_by_item(
+    *,
+    embeddings_by_item: dict[str, torch.Tensor],
+    item_ids: list[str],
+    device: torch.device,
+    keep_on_device: bool,
+) -> torch.Tensor:
+    """Pack item-keyed embeddings into one dense row-indexed tensor."""
 
-    for state in optimizer.state.values():
-        for key, value in list(state.items()):
-            if torch.is_tensor(value):
-                state[key] = value.to(device)
+    packed = torch.stack(
+        [
+            embeddings_by_item[item_id].detach().to(dtype=torch.float32, device="cpu")
+            for item_id in item_ids
+        ],
+        dim=0,
+    ).contiguous()
+    if keep_on_device:
+        packed = packed.to(device=device, non_blocking=device.type == "cuda")
+    return packed
+
+
+def _normalize_packed_embeddings(
+    *,
+    embeddings_by_item: dict[str, torch.Tensor],
+    item_ids: list[str],
+) -> dict[str, torch.Tensor]:
+    """Normalize item embeddings for ablation paths without changing contracts."""
+
+    return {
+        item_id: F.normalize(embeddings_by_item[item_id].detach().to(dtype=torch.float32), dim=0).cpu()
+        for item_id in item_ids
+    }
+
+
+def _build_negative_pool_indices(
+    *,
+    negative_pool: dict[str, list[str]],
+    item_id_to_row: dict[str, int],
+) -> dict[int, list[int]]:
+    """Convert hard-negative item IDs to packed embedding row indices once."""
+
+    negative_pool_indices: dict[int, list[int]] = {}
+    for item_id, candidates in negative_pool.items():
+        if item_id not in item_id_to_row:
+            continue
+        row_index = item_id_to_row[item_id]
+        negative_pool_indices[row_index] = [
+            item_id_to_row[candidate]
+            for candidate in candidates
+            if candidate in item_id_to_row and candidate != item_id
+        ]
+    return negative_pool_indices
+
+
+def _sample_hard_negative_indices(
+    *,
+    item_index: int,
+    negative_pool_indices: dict[int, list[int]],
+    sample_size: int,
+    rng: Random,
+    fallback_indices: list[int],
+) -> list[int]:
+    """Sample graph-based negatives in packed row-index space."""
+
+    pool = list(negative_pool_indices.get(item_index, []))
+    rng.shuffle(pool)
+    sampled = pool[:sample_size]
+    if len(sampled) >= sample_size:
+        return sampled
+
+    fallback = [
+        candidate
+        for candidate in fallback_indices
+        if candidate != item_index and candidate not in sampled
+    ]
+    rng.shuffle(fallback)
+    sampled.extend(fallback[: sample_size - len(sampled)])
+
+    if not sampled:
+        sampled = [candidate for candidate in fallback_indices if candidate != item_index][:1]
+
+    while len(sampled) < sample_size and sampled:
+        sampled.append(sampled[-1])
+    return sampled
 
 
 def _sample_hard_negatives(
@@ -205,6 +283,7 @@ def train_behavior_aware_alignment(
     initial_model_state_dict: dict[str, object] | None = None,
     initial_optimizer_state_dict: dict[str, object] | None = None,
     initial_global_step: int = 0,
+    keep_embeddings_on_device: bool = True,
 ) -> AlignmentResult:
     """Train the Phase 1 behavior-aware projection heads."""
 
@@ -222,12 +301,14 @@ def train_behavior_aware_alignment(
         # normalized embeddings with the same dictionary contract expected by
         # the quantization and recommender stages.
         return AlignmentResult(
-            aligned_text_embeddings={
-                item_id: F.normalize(text_embeddings[item_id], dim=0).cpu() for item_id in item_ids
-            } if text_embeddings else {},
-            aligned_image_embeddings={
-                item_id: F.normalize(image_embeddings[item_id], dim=0).cpu() for item_id in item_ids
-            } if image_embeddings else {},
+            aligned_text_embeddings=_normalize_packed_embeddings(
+                embeddings_by_item=text_embeddings,
+                item_ids=item_ids,
+            ) if text_embeddings else {},
+            aligned_image_embeddings=_normalize_packed_embeddings(
+                embeddings_by_item=image_embeddings,
+                item_ids=item_ids,
+            ) if image_embeddings else {},
             positive_pairs=[],
             loss_history=[],
             model_state_dict=None,
@@ -237,31 +318,61 @@ def train_behavior_aware_alignment(
         # Single-modality ablations keep the same output contract but skip the
         # cross-item projection-head training that assumes both branches exist.
         return AlignmentResult(
-            aligned_text_embeddings={
-                item_id: F.normalize(text_embeddings[item_id], dim=0).cpu() for item_id in item_ids
-            } if text_embeddings else {},
-            aligned_image_embeddings={
-                item_id: F.normalize(image_embeddings[item_id], dim=0).cpu() for item_id in item_ids
-            } if image_embeddings else {},
+            aligned_text_embeddings=_normalize_packed_embeddings(
+                embeddings_by_item=text_embeddings,
+                item_ids=item_ids,
+            ) if text_embeddings else {},
+            aligned_image_embeddings=_normalize_packed_embeddings(
+                embeddings_by_item=image_embeddings,
+                item_ids=item_ids,
+            ) if image_embeddings else {},
             positive_pairs=[],
             loss_history=[],
             model_state_dict=None,
         )
 
-    input_dim = next(iter(text_embeddings.values())).shape[-1]
+    item_id_to_row = {item_id: row_index for row_index, item_id in enumerate(item_ids)}
+    packed_text_embeddings = _pack_embeddings_by_item(
+        embeddings_by_item=text_embeddings,
+        item_ids=item_ids,
+        device=device,
+        keep_on_device=keep_embeddings_on_device,
+    )
+    packed_image_embeddings = _pack_embeddings_by_item(
+        embeddings_by_item=image_embeddings,
+        item_ids=item_ids,
+        device=device,
+        keep_on_device=keep_embeddings_on_device,
+    )
+    input_dim = packed_text_embeddings.shape[-1]
     model = BehaviorAwareAlignmentModel(input_dim=input_dim, projection_dim=projection_dim, dropout=dropout).to(device)
     if initial_model_state_dict:
         model.load_state_dict(initial_model_state_dict)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     if initial_optimizer_state_dict:
         optimizer.load_state_dict(initial_optimizer_state_dict)
-        _move_optimizer_state_to_device(optimizer, device)
+        move_optimizer_state_to_device(optimizer, device)
 
     positive_pairs = [
         pair for pair in build_positive_item_pairs(user_histories, window_size=window_size)
         if pair[0] in text_embeddings and pair[1] in text_embeddings and pair[0] in image_embeddings and pair[1] in image_embeddings
     ]
     negative_pool = build_graph_negative_pool(user_histories)
+    negative_pool_indices = _build_negative_pool_indices(
+        negative_pool=negative_pool,
+        item_id_to_row=item_id_to_row,
+    )
+    pair_anchor_indices = torch.tensor(
+        [item_id_to_row[anchor_item] for anchor_item, _ in positive_pairs],
+        dtype=torch.long,
+        device=device if keep_embeddings_on_device else "cpu",
+    )
+    pair_positive_indices = torch.tensor(
+        [item_id_to_row[positive_item] for _, positive_item in positive_pairs],
+        dtype=torch.long,
+        device=device if keep_embeddings_on_device else "cpu",
+    )
+    fallback_indices = list(range(len(item_ids)))
     rng = Random(seed)
     loss_history: list[float] = []
     global_step = max(0, int(initial_global_step))
@@ -271,12 +382,14 @@ def train_behavior_aware_alignment(
         # filtering. In that case we keep the proposal's stage boundary but
         # skip optimization rather than failing the whole pipeline.
         return AlignmentResult(
-            aligned_text_embeddings={
-                item_id: F.normalize(text_embeddings[item_id], dim=0).cpu() for item_id in item_ids
-            } if text_embeddings else {},
-            aligned_image_embeddings={
-                item_id: F.normalize(image_embeddings[item_id], dim=0).cpu() for item_id in item_ids
-            } if image_embeddings else {},
+            aligned_text_embeddings=_normalize_packed_embeddings(
+                embeddings_by_item=text_embeddings,
+                item_ids=item_ids,
+            ) if text_embeddings else {},
+            aligned_image_embeddings=_normalize_packed_embeddings(
+                embeddings_by_item=image_embeddings,
+                item_ids=item_ids,
+            ) if image_embeddings else {},
             positive_pairs=[],
             loss_history=[],
             model_state_dict=None,
@@ -286,37 +399,66 @@ def train_behavior_aware_alignment(
     total_steps = epochs * batches_per_epoch
     with make_progress_bar(total=total_steps, desc="Phase 1 alignment") as progress:
         for epoch_index in range(epochs):
-            shuffled_pairs = list(positive_pairs)
-            rng.shuffle(shuffled_pairs)
+            shuffled_pair_indices = list(range(len(positive_pairs)))
+            rng.shuffle(shuffled_pair_indices)
 
-            for batch_index, start in enumerate(range(0, len(shuffled_pairs), batch_size), start=1):
+            for batch_index, start in enumerate(range(0, len(shuffled_pair_indices), batch_size), start=1):
                 # Each batch is constructed in item-pair space rather than user
                 # space because the proposal's alignment objective operates over
                 # collaborative item-item positives extracted from the graph.
-                batch_pairs = shuffled_pairs[start : start + batch_size]
-                anchors = [pair[0] for pair in batch_pairs]
-                positives = [pair[1] for pair in batch_pairs]
+                batch_pair_rows = torch.tensor(
+                    shuffled_pair_indices[start : start + batch_size],
+                    dtype=torch.long,
+                    device=pair_anchor_indices.device,
+                )
+                anchor_indices = pair_anchor_indices.index_select(0, batch_pair_rows)
+                positive_indices = pair_positive_indices.index_select(0, batch_pair_rows)
 
-                batch_text_anchor = torch.stack([text_embeddings[item_id] for item_id in anchors]).to(device)
-                batch_text_positive = torch.stack([text_embeddings[item_id] for item_id in positives]).to(device)
-                batch_image_anchor = torch.stack([image_embeddings[item_id] for item_id in anchors]).to(device)
-                batch_image_positive = torch.stack([image_embeddings[item_id] for item_id in positives]).to(device)
+                batch_text_anchor = packed_text_embeddings.index_select(0, anchor_indices)
+                batch_text_positive = packed_text_embeddings.index_select(0, positive_indices)
+                batch_image_anchor = packed_image_embeddings.index_select(0, anchor_indices)
+                batch_image_positive = packed_image_embeddings.index_select(0, positive_indices)
 
-                text_negative_sets = []
-                image_negative_sets = []
-                for item_id in anchors:
-                    negative_ids = _sample_hard_negatives(
-                        item_id=item_id,
-                        negative_pool=negative_pool,
-                        sample_size=hard_negative_count,
-                        rng=rng,
-                        fallback_items=item_ids,
+                if hard_negative_count > 0:
+                    anchor_indices_cpu = anchor_indices.detach().cpu().tolist()
+                    negative_rows = [
+                        _sample_hard_negative_indices(
+                            item_index=int(item_index),
+                            negative_pool_indices=negative_pool_indices,
+                            sample_size=hard_negative_count,
+                            rng=rng,
+                            fallback_indices=fallback_indices,
+                        )
+                        for item_index in anchor_indices_cpu
+                    ]
+                    negative_indices = torch.tensor(
+                        negative_rows,
+                        dtype=torch.long,
+                        device=pair_anchor_indices.device,
                     )
-                    text_negative_sets.append(torch.stack([text_embeddings[negative_id] for negative_id in negative_ids], dim=0))
-                    image_negative_sets.append(torch.stack([image_embeddings[negative_id] for negative_id in negative_ids], dim=0))
+                    text_negative_batch = packed_text_embeddings.index_select(
+                        0,
+                        negative_indices.reshape(-1),
+                    ).reshape(anchor_indices.size(0), hard_negative_count, input_dim)
+                    image_negative_batch = packed_image_embeddings.index_select(
+                        0,
+                        negative_indices.reshape(-1),
+                    ).reshape(anchor_indices.size(0), hard_negative_count, input_dim)
+                else:
+                    text_negative_batch = packed_text_embeddings.new_empty(
+                        (anchor_indices.size(0), 0, input_dim)
+                    )
+                    image_negative_batch = packed_image_embeddings.new_empty(
+                        (anchor_indices.size(0), 0, input_dim)
+                    )
 
-                text_negative_batch = torch.stack(text_negative_sets).to(device)
-                image_negative_batch = torch.stack(image_negative_sets).to(device)
+                if not keep_embeddings_on_device:
+                    batch_text_anchor = batch_text_anchor.to(device=device, non_blocking=device.type == "cuda")
+                    batch_text_positive = batch_text_positive.to(device=device, non_blocking=device.type == "cuda")
+                    batch_image_anchor = batch_image_anchor.to(device=device, non_blocking=device.type == "cuda")
+                    batch_image_positive = batch_image_positive.to(device=device, non_blocking=device.type == "cuda")
+                    text_negative_batch = text_negative_batch.to(device=device, non_blocking=device.type == "cuda")
+                    image_negative_batch = image_negative_batch.to(device=device, non_blocking=device.type == "cuda")
 
                 optimizer.zero_grad()
 
@@ -325,15 +467,25 @@ def train_behavior_aware_alignment(
                 # representation of the other before quantization.
                 projected_text_anchor = model.text_head(batch_text_anchor)
                 projected_text_positive = model.text_head(batch_text_positive)
-                projected_text_negatives = model.text_head(text_negative_batch.reshape(-1, input_dim)).reshape(
-                    text_negative_batch.size(0), text_negative_batch.size(1), -1
-                )
+                if text_negative_batch.numel() > 0:
+                    projected_text_negatives = model.text_head(text_negative_batch.reshape(-1, input_dim)).reshape(
+                        text_negative_batch.size(0), text_negative_batch.size(1), -1
+                    )
+                else:
+                    projected_text_negatives = projected_text_anchor.new_empty(
+                        (text_negative_batch.size(0), 0, projected_text_anchor.size(-1))
+                    )
 
                 projected_image_anchor = model.image_head(batch_image_anchor)
                 projected_image_positive = model.image_head(batch_image_positive)
-                projected_image_negatives = model.image_head(image_negative_batch.reshape(-1, input_dim)).reshape(
-                    image_negative_batch.size(0), image_negative_batch.size(1), -1
-                )
+                if image_negative_batch.numel() > 0:
+                    projected_image_negatives = model.image_head(image_negative_batch.reshape(-1, input_dim)).reshape(
+                        image_negative_batch.size(0), image_negative_batch.size(1), -1
+                    )
+                else:
+                    projected_image_negatives = projected_image_anchor.new_empty(
+                        (image_negative_batch.size(0), 0, projected_image_anchor.size(-1))
+                    )
 
                 text_loss = _info_nce_loss(
                     anchor_embeddings=projected_text_anchor,
@@ -371,20 +523,27 @@ def train_behavior_aware_alignment(
                 progress.set_postfix(postfix)
                 progress.update(1)
 
+    aligned_text_embeddings: dict[str, torch.Tensor] = {}
+    aligned_image_embeddings: dict[str, torch.Tensor] = {}
+    model.eval()
     with torch.no_grad():
-        aligned_text_embeddings = {
-            item_id: model.text_head(text_embeddings[item_id].unsqueeze(0).to(device)).squeeze(0).cpu()
-            for item_id in item_ids
-        }
-        aligned_image_embeddings = {
-            item_id: model.image_head(image_embeddings[item_id].unsqueeze(0).to(device)).squeeze(0).cpu()
-            for item_id in item_ids
-        }
+        for start in range(0, len(item_ids), batch_size):
+            row_slice = slice(start, start + batch_size)
+            text_batch = packed_text_embeddings[row_slice]
+            image_batch = packed_image_embeddings[row_slice]
+            if not keep_embeddings_on_device:
+                text_batch = text_batch.to(device=device, non_blocking=device.type == "cuda")
+                image_batch = image_batch.to(device=device, non_blocking=device.type == "cuda")
+            projected_text = model.text_head(text_batch).cpu()
+            projected_image = model.image_head(image_batch).cpu()
+            for offset, item_id in enumerate(item_ids[start : start + batch_size]):
+                aligned_text_embeddings[item_id] = projected_text[offset]
+                aligned_image_embeddings[item_id] = projected_image[offset]
 
     return AlignmentResult(
         aligned_text_embeddings=aligned_text_embeddings,
         aligned_image_embeddings=aligned_image_embeddings,
         positive_pairs=positive_pairs,
         loss_history=loss_history,
-        model_state_dict=model.state_dict(),
+        model_state_dict=module_state_dict_to_cpu(model),
     )

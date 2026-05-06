@@ -23,6 +23,12 @@ from masi.alignment.behavior_alignment import train_behavior_aware_alignment
 from masi.common.checkpoints import StepCheckpointManager, find_stage_resume_checkpoint, load_checkpoint_payload
 from masi.common.config import find_repo_root, load_json_config
 from masi.common.io import ensure_directory, write_json
+from masi.common.runtime import (
+    clear_device_cache,
+    module_state_dict_to_cpu,
+    optimizer_state_dict_to_cpu,
+    resolve_torch_device,
+)
 from masi.common.toggles import MethodToggleConfig
 from masi.data.amazon_csj_assets import (
     download_item_images_with_options,
@@ -32,7 +38,6 @@ from masi.data.amazon_csj_subset import select_real_amazon_subset
 from masi.tokenization.masi_tokens import (
     build_fused_ids_from_quantized_codes,
     encode_clip_embeddings,
-    select_device,
     write_fused_ids,
 )
 from masi.tokenization.rqvae import train_rqvae_model
@@ -124,6 +129,7 @@ def main() -> None:
     clip_config = dict(config["clip"])
     alignment_config = dict(config["alignment"])
     tokenization_config = dict(config["tokenization"])
+    runtime_config = dict(config.get("runtime", {}))
     checkpointing_config = dict(config.get("checkpointing", {}))
     toggles = MethodToggleConfig.from_mapping(config.get("method_toggles"))
     toggle_state = asdict(toggles)
@@ -179,7 +185,7 @@ def main() -> None:
     )
     image_paths = image_download_result.image_paths_by_item
 
-    device = select_device()
+    device = resolve_torch_device(runtime_config)
     clip_model_source = str(
         clip_config.get("local_model_path")
         or clip_config.get("model_path")
@@ -194,6 +200,7 @@ def main() -> None:
         use_text_modality=toggles.use_text_modality,
         use_visual_modality=toggles.use_visual_modality,
     )
+    clear_device_cache(device)
 
     available_item_ids = set(subset.item_records)
     if toggles.use_text_modality:
@@ -273,8 +280,8 @@ def main() -> None:
             payload={
                 "config": config,
                 "method_toggles": toggle_state,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
+                "model_state_dict": module_state_dict_to_cpu(model),
+                "optimizer_state_dict": optimizer_state_dict_to_cpu(optimizer),
                 "global_step": global_step,
                 "epoch_index": epoch_index,
                 "step_in_epoch": step_in_epoch,
@@ -304,7 +311,9 @@ def main() -> None:
         if alignment_resume_payload else None,
         initial_global_step=int(alignment_resume_payload.get("global_step", 0))
         if alignment_resume_payload else 0,
+        keep_embeddings_on_device=bool(alignment_config.get("keep_embeddings_on_device", True)),
     )
+    clear_device_cache(device)
     if resolved_checkpoint_root is not None and alignment_result.model_state_dict is not None:
         alignment_checkpoint_path = resolved_checkpoint_root / "behavior_alignment.pt"
         torch.save(
@@ -354,8 +363,8 @@ def main() -> None:
                 payload={
                     "config": config,
                     "modality": "text",
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
+                    "model_state_dict": module_state_dict_to_cpu(model),
+                    "optimizer_state_dict": optimizer_state_dict_to_cpu(optimizer),
                     "global_step": global_step,
                     "epoch_index": epoch_index,
                     "step_in_epoch": step_in_epoch,
@@ -393,12 +402,14 @@ def main() -> None:
                 {
                     "config": config,
                     "modality": "text",
-                    "model_state_dict": text_quantizer_model.state_dict(),
+                    "model_state_dict": module_state_dict_to_cpu(text_quantizer_model),
                     "code_indices_by_item": text_quantization.code_indices_by_item,
                 },
                 text_quantizer_checkpoint_path,
             )
             checkpoint_paths["text_rqvae"] = str(text_quantizer_checkpoint_path)
+        text_quantizer_model.to("cpu")
+        clear_device_cache(device)
     else:
         text_checkpoint_manager = None
     if toggles.use_visual_modality:
@@ -434,8 +445,8 @@ def main() -> None:
                 payload={
                     "config": config,
                     "modality": "vision",
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
+                    "model_state_dict": module_state_dict_to_cpu(model),
+                    "optimizer_state_dict": optimizer_state_dict_to_cpu(optimizer),
                     "global_step": global_step,
                     "epoch_index": epoch_index,
                     "step_in_epoch": step_in_epoch,
@@ -471,12 +482,14 @@ def main() -> None:
                 {
                     "config": config,
                     "modality": "vision",
-                    "model_state_dict": image_quantizer_model.state_dict(),
+                    "model_state_dict": module_state_dict_to_cpu(image_quantizer_model),
                     "code_indices_by_item": image_quantization.code_indices_by_item,
                 },
                 image_quantizer_checkpoint_path,
             )
             checkpoint_paths["vision_rqvae"] = str(image_quantizer_checkpoint_path)
+        image_quantizer_model.to("cpu")
+        clear_device_cache(device)
     else:
         image_checkpoint_manager = None
 
@@ -520,6 +533,7 @@ def main() -> None:
     summary = {
         "seed": seed,
         "device": str(device),
+        "runtime": runtime_config,
         "subset_summary": subset.summary,
         "metadata_records_found": len(metadata_by_item),
         "image_files_downloaded": len(image_download_result.downloaded_item_ids),
@@ -533,6 +547,7 @@ def main() -> None:
         "method_toggles": asdict(toggles),
         "multimodal_source": metadata_source,
         "alignment_status": alignment_status,
+        "alignment_embeddings_on_device": bool(alignment_config.get("keep_embeddings_on_device", True)),
         "positive_pairs": len(alignment_result.positive_pairs),
         "alignment_steps": len(alignment_result.loss_history),
         "alignment_last_loss": alignment_result.loss_history[-1] if alignment_result.loss_history else None,

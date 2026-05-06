@@ -88,8 +88,8 @@ def run_training_epochs(
         for epoch_index in range(epochs):
             batch_losses: list[float] = []
             for batch_index, batch in enumerate(data_loader, start=1):
-                batch_inputs = batch[input_key].to(device)
-                batch_labels = batch[label_key].to(device)
+                batch_inputs = batch[input_key].to(device=device, non_blocking=device.type == "cuda")
+                batch_labels = batch[label_key].to(device=device, non_blocking=device.type == "cuda")
                 loss_value = training_step(
                     model=model,
                     optimizer=optimizer,

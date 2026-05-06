@@ -219,6 +219,10 @@ def main() -> None:
 
     token_config = {
         "seed": int(config["seed"]),
+        "runtime": {
+            "device": str(runtime_config.get("device", "auto")),
+            "log_device_summary": bool(runtime_config.get("log_device_summary", True)),
+        },
         "dataset": {
             "reviews_path": str(reviews_path.resolve()),
             "min_user_interactions": int(dataset_config["min_user_interactions"]),
@@ -253,6 +257,10 @@ def main() -> None:
 
     experiment_config = {
         "seed": int(config["seed"]),
+        "runtime": {
+            "device": str(runtime_config.get("device", "auto")),
+            "log_device_summary": bool(runtime_config.get("log_device_summary", True)),
+        },
         "history_max_tokens": int(config["experiment"]["history_max_tokens"]),
         "target_max_tokens": config["experiment"].get("target_max_tokens"),
         "mlm_max_tokens": config["experiment"].get("mlm_max_tokens"),

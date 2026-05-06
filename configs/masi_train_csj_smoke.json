@@ -1,6 +1,8 @@
 {
   "seed": 7,
   "runtime": {
+    "device": "auto",
+    "log_device_summary": true,
     "run_name": "amazon_csj_smoke_train",
     "resume_if_artifacts_exist": true,
     "download_reviews_if_missing": false,
@@ -34,7 +36,8 @@
     "temperature": 0.07,
     "hard_negative_count": 4,
     "window_size": 2,
-    "dropout": 0.1
+    "dropout": 0.1,
+    "keep_embeddings_on_device": true
   },
   "tokenization": {
     "latent_dim": 128,

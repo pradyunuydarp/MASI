@@ -70,11 +70,21 @@ These baselines define the evaluation bar for cold-start hit rate, coverage, and
 
 ## Hardware Assumptions
 
-- CLIP extraction and RQ-VAE training run on `cuda`, `mps`, or `cpu`, but the bounded subset configs are GPU-preferred for practical turnaround.
-- The later-stage Phase 3 modules now use `cuda` when available, otherwise `mps`, otherwise `cpu`.
+- Runtime device selection is centralized in [src/masi/common/runtime.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/common/runtime.py). Configs accept `runtime.device` as `auto`, `cuda`, `mps`, or `cpu`; `auto` selects CUDA first, then MPS, then CPU. `runtime.log_device_summary` logs the selected backend, CUDA device name, and CUDA memory summary when available.
+- CLIP extraction, Phase 1 behavior-aware alignment, Phase 2 RQ-VAE training and residual k-means, Phase 3 cross-modal MLM, autoregressive fine-tuning, and ranking score batches run on the selected device when possible.
+- Phase 1 now pre-packs text/image embeddings into dense row-indexed tensors once, moves them to the selected device once by default, and trains from integer index tensors instead of rebuilding Python dictionary stacks each step. Set `alignment.keep_embeddings_on_device: false` only when GPU memory is too tight.
 - On Apple Silicon, the Phase 3 Transformer stack disables PyTorch's nested-tensor fast path so MLM pretraining and generative ranking can run on `mps` without falling back to CPU.
+- CPU is still intentional for JSONL ingestion/filtering, metadata/image download and PIL image decode, final cached CLIP embedding dictionaries, hard-negative ID sampling, checkpoint/artifact serialization, candidate-pool construction, sorting, and scalar metric aggregation.
 - The canonical workflow is now subset-first: prepare a bounded CSJ dataset locally, download images locally on CPU, upload that prepared dataset to Kaggle, and train from the prepared slice without redownloading the full raw files or image set.
 - Kaggle remains a bounded-run target rather than a raw full-CSJ target because the raw review dump, raw metadata dump, and full image cache do not fit safely inside one ephemeral session.
+
+To verify GPU use on Kaggle, run the training command in one cell and monitor another cell with:
+
+```bash
+nvidia-smi -l 2
+```
+
+The training logs should report `MASI selected torch device: cuda` plus the CUDA device name. During CLIP encoding, Phase 1 alignment, RQ-VAE training, Phase 3 MLM/fine-tuning, and batched evaluation, `nvidia-smi` should show the Python process using GPU memory and compute. The CLIP batch size is not increased by default; the configs keep bounded Kaggle memory behavior.
 
 ## Subset-First CSJ Training
 
