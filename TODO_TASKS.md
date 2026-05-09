@@ -117,6 +117,7 @@ This file is the living progress ledger for AI agents working on MASI. Update it
 - `DONE` Run `notebooks/08_full_dataset_pipeline.ipynb` with `KAGGLE_SAFE_PROFILE = "scaled_safe"` and record the warm/cold metrics.
   Artifact: [Kaggle_interactions/masi-full-dataset.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/Kaggle_interactions/masi-full-dataset.ipynb), [docs/kaggle_full_dataset_scaleup_journey.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/kaggle_full_dataset_scaleup_journey.md)
 - `TODO` Run `notebooks/08_full_dataset_pipeline.ipynb` with `KAGGLE_SAFE_PROFILE = "long_safe"` and record the new warm/cold metrics plus whether cold `HR@10` leaves zero.
+- `TODO` Retry the `long_safe` Kaggle Phase 1/2 token build after the lazy graph-negative sampler fix and verify that the Phase 1 progress bar starts instead of stalling before alignment.
 - `TODO` Reattach the exported `long_safe` resume bundle on the next Kaggle session and verify that `restored_checkpoint_paths` is populated in both `masi_token_summary.json` and `experiment_summary.json`.
 - `TODO` Prepare and upload the first canonical `masi-amazon-csj-subset-large` Kaggle Dataset with `subset_manifest.json`, `image_download_manifest.json`, and the full `images/` directory.
 - `BLOCKED` Superseded the near-term raw full-CSJ benchmark run with the subset-first canonical workflow; keep the full-corpus path only as a deferred reference until storage, preprocessing, and evaluation scaling work land.
@@ -137,6 +138,8 @@ This file is the living progress ledger for AI agents working on MASI. Update it
   Artifact: [src/masi/alignment/behavior_alignment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/alignment/behavior_alignment.py), [scripts/build_masi_tokens.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/build_masi_tokens.py), `alignment.keep_embeddings_on_device` in `configs/*.json`
 - `DONE` Remove full-pool shuffles from Phase 1 hard-negative sampling so alignment batches sample the requested graph negatives without repeatedly copying large candidate lists.
   Artifact: [src/masi/alignment/behavior_alignment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/alignment/behavior_alignment.py)
+- `DONE` Replace Phase 1's materialized per-item non-neighbor pools with compact neighbor sets and lazy graph-negative sampling for the `long_safe` Kaggle profile.
+  Artifact: [src/masi/alignment/behavior_alignment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/alignment/behavior_alignment.py), [tests/test_behavior_alignment.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/tests/test_behavior_alignment.py). Diagnosis: the failing notebook reached `scripts/build_masi_tokens.py` cell 15 and likely stalled/OOMed before the Phase 1 progress bar while constructing an O(num_items^2) negative-pool dictionary for ~24,576 candidate items.
 - `TODO` Evaluate whether projected embeddings improve behavioral clustering for warm items.
 - `TODO` Define the cold-start inference path for items without interaction edges.
 

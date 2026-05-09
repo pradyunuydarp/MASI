@@ -63,7 +63,12 @@ def build_positive_item_pairs(
 def build_graph_negative_pool(
     user_histories: dict[str, list[str]],
 ) -> dict[str, list[str]]:
-    """Build a simple hard-negative pool from high-frequency non-neighbor items."""
+    """Build a simple hard-negative pool from high-frequency non-neighbor items.
+
+    This helper is kept for small debugging and compatibility paths. The main
+    training loop uses row-index neighbor sets instead so larger Kaggle profiles
+    do not materialize an O(num_items^2) negative-pool dictionary.
+    """
 
     neighbors: dict[str, set[str]] = defaultdict(set)
     item_counter = Counter(item_id for history in user_histories.values() for item_id in history)
@@ -81,6 +86,39 @@ def build_graph_negative_pool(
     for item_id in sorted_items:
         negative_pool[item_id] = [candidate for candidate in sorted_items if candidate != item_id and candidate not in neighbors[item_id]]
     return negative_pool
+
+
+def _build_graph_neighbor_indices(
+    *,
+    user_histories: dict[str, list[str]],
+    item_id_to_row: dict[str, int],
+) -> tuple[dict[int, set[int]], list[int]]:
+    """Build compact graph neighbor sets and popularity-ordered candidates."""
+
+    neighbors_by_row: dict[int, set[int]] = defaultdict(set)
+    item_counter = Counter(
+        item_id
+        for history in user_histories.values()
+        for item_id in history
+        if item_id in item_id_to_row
+    )
+
+    for history in user_histories.values():
+        unique_rows = [
+            item_id_to_row[item_id]
+            for item_id in dict.fromkeys(history)
+            if item_id in item_id_to_row
+        ]
+        for row_index in unique_rows:
+            neighbors_by_row[row_index].update(
+                other_index for other_index in unique_rows if other_index != row_index
+            )
+
+    popularity_indices = [
+        item_id_to_row[item_id]
+        for item_id, _ in item_counter.most_common()
+    ]
+    return neighbors_by_row, popularity_indices
 
 
 class ProjectionHead(nn.Module):
@@ -167,29 +205,42 @@ def _build_negative_pool_indices(
 def _sample_hard_negative_indices(
     *,
     item_index: int,
-    negative_pool_indices: dict[int, list[int]],
+    neighbor_indices: dict[int, set[int]],
     sample_size: int,
     rng: Random,
+    popularity_indices: list[int],
     fallback_indices: list[int],
 ) -> list[int]:
     """Sample graph-based negatives in packed row-index space."""
 
-    pool = negative_pool_indices.get(item_index, [])
-    if len(pool) >= sample_size:
-        return rng.sample(pool, sample_size)
+    blocked = neighbor_indices.get(item_index, set())
+    sampled: list[int] = []
+    sampled_set: set[int] = set()
 
-    sampled = list(pool)
-    rng.shuffle(sampled)
-    if len(sampled) >= sample_size:
-        return sampled
+    def add_candidate(candidate: int) -> None:
+        if candidate == item_index or candidate in blocked or candidate in sampled_set:
+            return
+        sampled.append(candidate)
+        sampled_set.add(candidate)
 
-    fallback = [
-        candidate
-        for candidate in fallback_indices
-        if candidate != item_index and candidate not in sampled
-    ]
-    rng.shuffle(fallback)
-    sampled.extend(fallback[: sample_size - len(sampled)])
+    candidate_sources = [popularity_indices, fallback_indices]
+    for source in candidate_sources:
+        if len(sampled) >= sample_size or not source:
+            continue
+        # Try random probes first so anchors do not all receive the exact same
+        # head of the popularity list, then scan only as much as needed.
+        max_random_attempts = min(len(source), max(sample_size * 16, 64))
+        for _ in range(max_random_attempts):
+            add_candidate(source[rng.randrange(len(source))])
+            if len(sampled) >= sample_size:
+                break
+        if len(sampled) >= sample_size:
+            break
+        scan_start = rng.randrange(len(source))
+        for offset in range(len(source)):
+            add_candidate(source[(scan_start + offset) % len(source)])
+            if len(sampled) >= sample_size:
+                break
 
     if not sampled:
         sampled = [candidate for candidate in fallback_indices if candidate != item_index][:1]
@@ -363,11 +414,12 @@ def train_behavior_aware_alignment(
         pair for pair in build_positive_item_pairs(user_histories, window_size=window_size)
         if pair[0] in text_embeddings and pair[1] in text_embeddings and pair[0] in image_embeddings and pair[1] in image_embeddings
     ]
-    negative_pool = build_graph_negative_pool(user_histories)
-    negative_pool_indices = _build_negative_pool_indices(
-        negative_pool=negative_pool,
+    neighbor_indices, popularity_indices = _build_graph_neighbor_indices(
+        user_histories=user_histories,
         item_id_to_row=item_id_to_row,
     )
+    if not popularity_indices:
+        popularity_indices = list(range(len(item_ids)))
     pair_anchor_indices = torch.tensor(
         [item_id_to_row[anchor_item] for anchor_item, _ in positive_pairs],
         dtype=torch.long,
@@ -430,9 +482,10 @@ def train_behavior_aware_alignment(
                     negative_rows = [
                         _sample_hard_negative_indices(
                             item_index=int(item_index),
-                            negative_pool_indices=negative_pool_indices,
+                            neighbor_indices=neighbor_indices,
                             sample_size=hard_negative_count,
                             rng=rng,
+                            popularity_indices=popularity_indices,
                             fallback_indices=fallback_indices,
                         )
                         for item_index in anchor_indices_cpu
