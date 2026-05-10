@@ -28,20 +28,47 @@ class AmazonSubset:
     summary: dict[str, object]
 
 
-def iter_jsonl(path: str | Path, *, limit: int | None = None) -> Iterator[JsonRecord]:
-    """Yield JSON objects from a JSONL file with an optional line limit."""
+def iter_jsonl(
+    path: str | Path,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> Iterator[JsonRecord]:
+    """Yield JSON objects from a JSONL file with optional line offset and limit."""
 
     file_path = Path(path).expanduser().resolve()
+    skipped = 0
+    yielded = 0
     with file_path.open("r", encoding="utf-8") as handle:
-        for index, line in enumerate(handle):
-            if limit is not None and index >= limit:
+        for line in handle:
+            if skipped < offset:
+                skipped += 1
+                continue
+            if limit is not None and yielded >= limit:
                 break
             if not line.strip():
                 continue
             try:
+                yielded += 1
                 yield json.loads(line)
             except json.JSONDecodeError:
                 continue
+
+
+def _ranked_count_keys(
+    counter: Counter[str],
+    *,
+    limit: int | None,
+    offset: int,
+) -> set[str] | None:
+    """Select a deterministic rank window from a frequency counter."""
+
+    if limit is None:
+        return None
+    ranked = sorted(counter.items(), key=lambda pair: (-pair[1], pair[0]))
+    start = max(0, offset)
+    stop = start + limit
+    return {key for key, _ in ranked[start:stop]}
 
 
 def select_real_amazon_subset(
@@ -52,6 +79,9 @@ def select_real_amazon_subset(
     max_users: int,
     max_items: int,
     max_review_records: int | None,
+    review_record_offset: int = 0,
+    user_rank_offset: int = 0,
+    item_rank_offset: int = 0,
     collapse_consecutive_duplicates: bool = False,
 ) -> AmazonSubset:
     """Select a bounded real-data subset from Amazon CSJ reviews."""
@@ -66,13 +96,20 @@ def select_real_amazon_subset(
     )
     user_limit = None if int(max_users) <= 0 else int(max_users)
     item_limit = None if int(max_items) <= 0 else int(max_items)
+    review_record_offset = max(0, int(review_record_offset or 0))
+    user_rank_offset = max(0, int(user_rank_offset or 0))
+    item_rank_offset = max(0, int(item_rank_offset or 0))
 
     raw_interactions: list[JsonRecord] = []
     review_records: list[JsonRecord] = []
     review_summary_by_item: dict[str, JsonRecord] = {}
     review_records_scanned = 0
 
-    for review in iter_jsonl(reviews_path, limit=review_record_limit):
+    for review in iter_jsonl(
+        reviews_path,
+        limit=review_record_limit,
+        offset=review_record_offset,
+    ):
         review_records_scanned += 1
         user_id = str(review.get("user_id", "")).strip()
         parent_asin = str(review.get("parent_asin", "")).strip()
@@ -108,30 +145,26 @@ def select_real_amazon_subset(
 
     if user_limit is not None:
         user_counts = Counter(str(record["user_id"]) for record in filtered_interactions)
-        keep_users = {
-            user_id
-            for user_id, _ in sorted(
-                user_counts.items(),
-                key=lambda pair: (-pair[1], pair[0]),
-            )[:user_limit]
-        }
+        keep_users = _ranked_count_keys(
+            user_counts,
+            limit=user_limit,
+            offset=user_rank_offset,
+        )
         filtered_interactions = [
             record for record in filtered_interactions
-            if str(record["user_id"]) in keep_users
+            if keep_users is not None and str(record["user_id"]) in keep_users
         ]
 
     if item_limit is not None:
         item_counts = Counter(str(record["parent_asin"]) for record in filtered_interactions)
-        keep_items = {
-            item_id
-            for item_id, _ in sorted(
-                item_counts.items(),
-                key=lambda pair: (-pair[1], pair[0]),
-            )[:item_limit]
-        }
+        keep_items = _ranked_count_keys(
+            item_counts,
+            limit=item_limit,
+            offset=item_rank_offset,
+        )
         filtered_interactions = [
             record for record in filtered_interactions
-            if str(record["parent_asin"]) in keep_items
+            if keep_items is not None and str(record["parent_asin"]) in keep_items
         ]
 
     if user_limit is not None or item_limit is not None:
@@ -189,6 +222,10 @@ def select_real_amazon_subset(
         "max_users": user_limit,
         "max_items": item_limit,
         "max_review_records": review_record_limit,
+        "review_records_skipped": review_record_offset,
+        "review_record_offset": review_record_offset,
+        "user_rank_offset": user_rank_offset,
+        "item_rank_offset": item_rank_offset,
         "reviews_path": str(Path(reviews_path).expanduser().resolve()),
         "source_mode": "real_amazon_reviews_only",
         "five_core_applied": True,

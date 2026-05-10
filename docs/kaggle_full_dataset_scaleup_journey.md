@@ -182,6 +182,10 @@ Why this profile:
   `checkpointing.restore_from_checkpoints = true`, so repeated `long_safe`
   runs continue from recovered stage checkpoints instead of restarting from
   fresh weights.
+- On each restored continuation, the notebook advances `data_chunk_index` and
+  sets `dataset.user_rank_offset = data_chunk_index * max_users`, so the next
+  bounded run trains on a different user-rank window from the prepared dataset.
+  The run root stays fixed so prior checkpoints remain discoverable.
 
 If Kaggle kills this profile with `SIGKILL: 9`, lower these first:
 

@@ -110,6 +110,9 @@ def build_real_amazon_histories(
     max_users: int,
     max_items: int,
     max_review_records: int | None,
+    review_record_offset: int = 0,
+    user_rank_offset: int = 0,
+    item_rank_offset: int = 0,
     collapse_consecutive_duplicates: bool = False,
 ) -> AmazonSequenceBuildResult:
     """Build recommender-ready histories from the real Amazon CSJ subset.
@@ -126,6 +129,9 @@ def build_real_amazon_histories(
         max_users=max_users,
         max_items=max_items,
         max_review_records=max_review_records,
+        review_record_offset=review_record_offset,
+        user_rank_offset=user_rank_offset,
+        item_rank_offset=item_rank_offset,
         collapse_consecutive_duplicates=collapse_consecutive_duplicates,
     )
     fused_ids = build_fused_ids_from_records(subset.item_records)

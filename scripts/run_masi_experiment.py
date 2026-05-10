@@ -118,6 +118,9 @@ def _prepare_inputs(
         max_users=int(dataset_config.get("max_users", 0) or 0),
         max_items=int(dataset_config.get("max_items", 0) or 0),
         max_review_records=_optional_positive_int(dataset_config.get("max_review_records")),
+        review_record_offset=int(dataset_config.get("review_record_offset", 0) or 0),
+        user_rank_offset=int(dataset_config.get("user_rank_offset", 0) or 0),
+        item_rank_offset=int(dataset_config.get("item_rank_offset", 0) or 0),
         collapse_consecutive_duplicates=bool(dataset_config.get("collapse_consecutive_duplicates", False)),
     )
 
@@ -291,6 +294,10 @@ def main() -> None:
         final_checkpoint_name="generative_recommender.pt",
         step_stage_name="generative_recommender_steps",
     )
+    mlm_initial_global_step = int(mlm_resume_payload.get("global_step", 0)) if mlm_resume_payload else 0
+    generative_initial_global_step = (
+        int(generative_resume_payload.get("global_step", 0)) if generative_resume_payload else 0
+    )
     if mlm_resume_payload is not None:
         restore_reports["cross_modal_mlm"] = _load_compatible_model_state(
             mlm_model,
@@ -356,8 +363,7 @@ def main() -> None:
             epochs=int(config["mlm_epochs"]),
             device=device,
             checkpoint_callback=_mlm_checkpoint_callback,
-            initial_global_step=int(mlm_resume_payload.get("global_step", 0))
-            if mlm_resume_payload else 0,
+            initial_global_step=mlm_initial_global_step,
         )
 
     if generative_resume_payload is not None:
@@ -449,8 +455,7 @@ def main() -> None:
             epochs=int(config["autoregressive_epochs"]),
             device=device,
             checkpoint_callback=_generative_checkpoint_callback,
-            initial_global_step=int(generative_resume_payload.get("global_step", 0))
-            if generative_resume_payload else 0,
+            initial_global_step=generative_initial_global_step,
         )
 
     checkpoint_paths: dict[str, str] = {}
@@ -463,6 +468,7 @@ def main() -> None:
                 "model_state_dict": module_state_dict_to_cpu(generative_model),
                 "vocabulary": vocabulary.token_to_id,
                 "item_tokens": item_tokens,
+                "global_step": generative_initial_global_step + (len(generative_history) * len(train_loader)),
             },
             generative_checkpoint_path,
         )
@@ -476,6 +482,7 @@ def main() -> None:
                     "method_toggles": toggle_state,
                     "model_state_dict": module_state_dict_to_cpu(mlm_model),
                     "vocabulary": vocabulary.token_to_id,
+                    "global_step": mlm_initial_global_step + (len(mlm_history) * len(mlm_loader)),
                 },
                 mlm_checkpoint_path,
             )

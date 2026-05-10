@@ -154,7 +154,7 @@ What the Kaggle path does:
 - loads an optional Kaggle secret named `HF_TOKEN`, stores Hugging Face assets under `/kaggle/working/masi_artifacts/hf_cache`, disables Xet transfers, and preloads CLIP before the long training command,
 - reuses an attached standalone CLIP model directory when present, otherwise downloads `openai/clip-vit-base-patch32` once into `/kaggle/working/masi_artifacts/hf_models/openai_clip-vit-base-patch32` and creates a zip that can be published as a private Kaggle Dataset/Model for later sessions,
 - derives a bounded Kaggle runtime config from `configs/Full_dataset.json` by default so the prepared full dataset is sampled within single-session memory limits; the full-dataset notebook now exposes `smoke_safe`, `scaled_safe`, and `long_safe` profiles in its first code cell, with `long_safe` as the current continuation metric-improvement default,
-- auto-restores a previously exported run bundle from `/kaggle/input` into `/kaggle/working/masi_artifacts/outputs/<run_name>` when `AUTO_RESTORE_RESUME_BUNDLE = True`, then re-runs training with `restore_from_checkpoints = true` so stage checkpoints are loaded and updated,
+- auto-restores a previously exported run bundle from `/kaggle/input` into `/kaggle/working/masi_artifacts/outputs/<run_name>` when `AUTO_RESTORE_RESUME_BUNDLE = True`, advances to the next bounded user-rank chunk when `ADVANCE_DATA_CHUNK_EACH_RUN = True`, then re-runs training with `restore_from_checkpoints = true` so the newest stage checkpoints are loaded and updated,
 - validates preloaded images from the attached dataset and downloads only missing ones into `/kaggle/working/masi_artifacts/data/processed/...`,
 - runs the same `train_masi.py` launcher against the prepared subset config with compact percentage bars for CLIP encoding, Phase 1 alignment, Phase 2 RQ-VAE training, and Phase 3 MLM/autoregressive training,
 - caps and batches warm/cold ranking candidates in the full-dataset notebook so evaluation shows progress and does not spend the whole session on exhaustive catalog scoring,
@@ -170,12 +170,13 @@ Where Kaggle checkpoints go:
 - periodic step checkpoints are retained in sibling directories such as `phase12_tokens/behavior_alignment_steps/step_0000025.pt` and `phase3_experiment/generative_recommender_steps/step_0000025.pt`.
 - the full-dataset Kaggle-safe notebook profiles now default to step checkpoints every 25 optimizer steps, and each periodic checkpoint directory writes a `latest.json` manifest with the newest retained checkpoint path.
 - `long_safe` currently runs a bounded continuation slice of `max_users = 12288`, `max_items = 24576`, `max_review_records = 50000000`, CLIP batch size `16`, Phase 1 epochs `10`, RQ-VAE epochs `30`, MLM epochs `10`, and autoregressive epochs `30`; evaluation remains capped at `1024` candidates with candidate batches of `128` to avoid Kaggle memory spikes.
+- repeated restored `long_safe` runs keep the same run root for checkpoint compatibility but set `dataset.user_rank_offset = data_chunk_index * max_users`; the exported `resume_bundle_manifest.json` records `data_chunk` so the next session can continue on the following user-rank chunk.
 
 How not to lose them after the session ends:
 
 - anything under `/kaggle/working` is ephemeral until you explicitly persist it,
 - use the notebook's zip-bundle packaging step and either `Save Version` on the Kaggle notebook or publish the bundle as a private Kaggle Dataset,
-- on the next session, reattach that resume dataset; the notebook scans attached input roots for a zip or unzipped folder with `run_manifest.json`, `resume_bundle_manifest.json`, or `checkpoints/` plus `resolved_configs/`, restores it automatically, and continues training from the recovered checkpoints.
+- on the next session, reattach that resume dataset; the notebook scans attached input roots for a zip or unzipped folder with `run_manifest.json`, `resume_bundle_manifest.json`, or `checkpoints/` plus `resolved_configs/`, restores it automatically, advances the chunk index, and continues training from the newest recovered checkpoints.
 - for CLIP specifically, publish `/kaggle/working/masi_artifacts/hf_models/openai_clip-vit-base-patch32.zip` as a private Kaggle Dataset/Model, then attach it to future notebooks; the CLIP cell auto-detects a directory with `config.json`, `preprocessor_config.json`, and model weights under `/kaggle/input`.
 
 ## Deferred Full-Corpus Path

@@ -230,6 +230,9 @@ def main() -> None:
             "max_users": dataset_config.get("max_users"),
             "max_items": dataset_config.get("max_items"),
             "max_review_records": dataset_config.get("max_review_records"),
+            "review_record_offset": dataset_config.get("review_record_offset", 0),
+            "user_rank_offset": dataset_config.get("user_rank_offset", 0),
+            "item_rank_offset": dataset_config.get("item_rank_offset", 0),
             "collapse_consecutive_duplicates": bool(dataset_config.get("collapse_consecutive_duplicates", False)),
         },
         "assets": {

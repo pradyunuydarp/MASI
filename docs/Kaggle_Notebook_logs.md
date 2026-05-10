@@ -89,7 +89,9 @@ Resume automation added after the first scale-up pass:
 - `AUTO_RESTORE_RESUME_BUNDLE = True` scans attached Kaggle inputs for a previous exported zip or unzipped bundle.
 - The bundle is restored into `/kaggle/working/masi_artifacts/outputs/amazon_csj_full_dataset_kaggle_long_safe_train`.
 - The runtime config sets `checkpointing.restore_from_checkpoints = true`, so Phase 1, Phase 2, MLM, and autoregressive checkpoints are loaded before another continuation run.
-- The export cell writes `resume_bundle_manifest.json` and packages the full run root, including final checkpoints, retained periodic checkpoints, fused IDs, resolved configs, summaries, and manifests.
+- Restored runs advance `data_chunk_index` and set `dataset.user_rank_offset = data_chunk_index * max_users`, so each continuation trains on a different bounded user-rank chunk while preserving the same run root for checkpoint compatibility.
+- The restore helper ranks final and periodic checkpoint candidates by modification time, then `global_step` when available, so an interrupted continuation can resume from the latest retained step checkpoint instead of falling back to an older final checkpoint.
+- The export cell writes `resume_bundle_manifest.json` and packages the full run root, including final checkpoints, retained periodic checkpoints, fused IDs, resolved configs, summaries, manifests, and `data_chunk` state.
 
 The saved output notebook `Kaggle_interactions/masi-full-dataset.ipynb` produced warm `HR@10 = 0.08262` and cold `HR@10 = 0.0` under the `scaled_safe` profile. The older smoke-scale result was warm `HR@10 = 0.04248` and cold `HR@10 = 0.0`. See `docs/kaggle_full_dataset_scaleup_journey.md` for the interpretation and the next scale-up plan.
 

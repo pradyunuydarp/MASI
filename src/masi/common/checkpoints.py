@@ -100,18 +100,33 @@ def find_stage_resume_checkpoint(
     final_checkpoint_name: str,
     step_stage_name: str,
 ) -> Path | None:
-    """Find the best checkpoint to restore for a training stage.
+    """Find the newest checkpoint to restore for a training stage.
 
-    Completed stages prefer their final checkpoint. Interrupted stages fall back
-    to the latest retained periodic checkpoint, whose manifest may contain an
-    absolute path from the previous Kaggle session.
+    Completed stages usually restore from their final checkpoint. Interrupted
+    continuation runs can leave a newer periodic checkpoint beside an older
+    final checkpoint, so candidates are ranked by modification time and then
+    saved `global_step` when present.
     """
 
-    final_checkpoint = checkpoint_root / final_checkpoint_name
-    if final_checkpoint.exists():
-        return final_checkpoint
+    candidates: list[tuple[int, float, Path]] = []
+
+    def _candidate_sort_key(path: Path) -> tuple[int, float, Path]:
+        global_step = -1
+        try:
+            payload = load_checkpoint_payload(path, map_location="cpu")
+            global_step = int(payload.get("global_step", -1))
+        except Exception:
+            global_step = -1
+        return global_step, path.stat().st_mtime, path
+
+    def _add_candidate(path: Path | None) -> None:
+        if path is not None and path.exists():
+            candidates.append(_candidate_sort_key(path))
 
     step_directory = checkpoint_root / step_stage_name
+    final_checkpoint = checkpoint_root / final_checkpoint_name
+    _add_candidate(final_checkpoint)
+
     latest_manifest = step_directory / "latest.json"
     if latest_manifest.exists():
         with latest_manifest.open("r", encoding="utf-8") as handle:
@@ -119,16 +134,16 @@ def find_stage_resume_checkpoint(
         raw_checkpoint_path = latest_payload.get("checkpoint_path")
         if raw_checkpoint_path:
             manifest_checkpoint = Path(str(raw_checkpoint_path))
-            if manifest_checkpoint.exists():
-                return manifest_checkpoint
+            _add_candidate(manifest_checkpoint if manifest_checkpoint.exists() else None)
             sibling_checkpoint = step_directory / manifest_checkpoint.name
-            if sibling_checkpoint.exists():
-                return sibling_checkpoint
+            _add_candidate(sibling_checkpoint if sibling_checkpoint.exists() else None)
 
     periodic_checkpoints = sorted(step_directory.glob("step_*.pt"))
     if periodic_checkpoints:
-        return periodic_checkpoints[-1]
-    return None
+        _add_candidate(periodic_checkpoints[-1])
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (item[1], item[0]))[2]
 
 
 def load_checkpoint_payload(checkpoint_path: Path, *, map_location: str | torch.device = "cpu") -> dict[str, Any]:

@@ -148,6 +148,9 @@ def main() -> None:
         max_users=int(dataset_config.get("max_users", 0) or 0),
         max_items=int(dataset_config.get("max_items", 0) or 0),
         max_review_records=_optional_positive_int(dataset_config.get("max_review_records")),
+        review_record_offset=int(dataset_config.get("review_record_offset", 0) or 0),
+        user_rank_offset=int(dataset_config.get("user_rank_offset", 0) or 0),
+        item_rank_offset=int(dataset_config.get("item_rank_offset", 0) or 0),
         collapse_consecutive_duplicates=bool(dataset_config.get("collapse_consecutive_duplicates", False)),
     )
 
@@ -253,6 +256,7 @@ def main() -> None:
         final_checkpoint_name="behavior_alignment.pt",
         step_stage_name="behavior_alignment_steps",
     )
+    alignment_initial_global_step = int(alignment_resume_payload.get("global_step", 0)) if alignment_resume_payload else 0
     alignment_checkpoint_manager = (
         StepCheckpointManager(
             checkpoint_root=resolved_checkpoint_root,
@@ -321,6 +325,7 @@ def main() -> None:
                 "config": config,
                 "method_toggles": toggle_state,
                 "model_state_dict": alignment_result.model_state_dict,
+                "global_step": alignment_initial_global_step + len(alignment_result.loss_history),
             },
             alignment_checkpoint_path,
         )
@@ -336,6 +341,7 @@ def main() -> None:
             final_checkpoint_name="text_rqvae.pt",
             step_stage_name="text_rqvae_steps",
         )
+        text_initial_global_step = int(text_resume_payload.get("global_step", 0)) if text_resume_payload else 0
         text_checkpoint_manager = (
             StepCheckpointManager(
                 checkpoint_root=resolved_checkpoint_root,
@@ -404,6 +410,7 @@ def main() -> None:
                     "modality": "text",
                     "model_state_dict": module_state_dict_to_cpu(text_quantizer_model),
                     "code_indices_by_item": text_quantization.code_indices_by_item,
+                    "global_step": text_initial_global_step + len(text_quantization.reconstruction_loss_history),
                 },
                 text_quantizer_checkpoint_path,
             )
@@ -418,6 +425,7 @@ def main() -> None:
             final_checkpoint_name="vision_rqvae.pt",
             step_stage_name="vision_rqvae_steps",
         )
+        image_initial_global_step = int(image_resume_payload.get("global_step", 0)) if image_resume_payload else 0
         image_checkpoint_manager = (
             StepCheckpointManager(
                 checkpoint_root=resolved_checkpoint_root,
@@ -484,6 +492,7 @@ def main() -> None:
                     "modality": "vision",
                     "model_state_dict": module_state_dict_to_cpu(image_quantizer_model),
                     "code_indices_by_item": image_quantization.code_indices_by_item,
+                    "global_step": image_initial_global_step + len(image_quantization.reconstruction_loss_history),
                 },
                 image_quantizer_checkpoint_path,
             )
