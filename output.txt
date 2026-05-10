@@ -1,0 +1,499 @@
+Multimodal-Augmented Semantic Identifiers for
+Cold-Start Discovery in Generative
+Recommendation: Research Proposal
+Pradyun Devarakonda
+
+Rajanala Dheeraj
+
+IMT2022525
+Devarakonda.Pradyun@iiitb.ac.in
+
+IMT2022093
+Rajanala.Saidheeraj@iiitb.ac.in
+
+Abstract—The architecture of commercial recommendation
+systems is undergoing a paradigm shift. The traditional ’Retrieveand-Rank’ pipeline involves scoring millions of item embeddings.
+It is being replaced by Generative Recommendation (GR). GR
+frameworks unify discovery as a sequence-to-sequence generation task and leverage the auto-regressive capabilities of Large
+Language Models (LLMs). The efficacy of GR however, is
+bottlenecked by its indexing strategy (how items are encoded
+into discrete, generative tokens). Current state-of-the-art systems
+use Semantic Identifiers (SIDs). SIDs are derived from Residual
+Quantized Variational Autoencoders (RQ-VAE) that operate on
+textual metadata. Therefore, in visual-heavy domains like shortform video and e-commerce, this unimodal reliance creates a
+’Semantic-Visual Gap’. However, recent studies highlight severe
+limitations in current multimodal SID extensions, specifically
+’modality sensitivity collapse’ and the ’semantic-behavioral gap’.
+Which might result in similar identifiers for visually distinct
+items. To tackle these problems, we propose the MultimodalAugmented Semantic ID (MASI) framework. MASI abandons
+traditional early-fusion techniques in favor of a modality-specific
+Late-Fusion Codebook strategy, coupled with a Behavior-Aware
+Contrastive alignment phase. We aim to improve zero-shot, coldstart discovery by encoding both aligned semantic categorization
+and visual features into a unified generative token space.
+Index Terms—Generative Recommendation, SASRec, Semantic Identifiers, Multimodal Fusion, Cold-Start Discovery, RQVAE, Generative Retrieval.
+
+I. I NTRODUCTION
+Organizations like Meta, Amazon, Apple, Netflix, Google,
+and OpenAI process billions of interactions daily. Traditionally, these platforms operated on a multi-stage discriminative
+pipeline:
+1) A fast retrieval model selects a few hundred candidates.
+2) A heavy ranking model scores them.
+However, the reasoning and generative capabilities of Large
+Language Models (LLMs) have catalyzed a shift towards
+Generative Recommendation (GR) [Liang and Y. Zhang 2025].
+In GR, recommendation is not a classification or scoring
+problem. It is a conditional text generation task. Given a user’s
+chronological interaction history, the model auto-regressively
+”writes” the identifier of the next item [Yang, H. Lin, Z. Zhang,
+et al. 2025]. The critical factor in this paradigm is the indexing
+strategy. Traditional systems used atomic IDs (e.g., assigning
+the integer ID_1051 to a specific movie). These IDs are
+semantically hollow. When a new item is introduced (the
+
+cold-start problem), its atomic ID has no learned embedding,
+causing the system to fail.
+To solve this, researchers introduced Semantic Identifiers
+(SIDs). SIDs are hierarchical codewords derived from item
+content (e.g., mapping a movie to a token sequence like [14,
+102, 12]) [Singh et al. 2024].
+SIDs however, are currently generated almost exclusively
+from textual descriptions. We argue that this creates a fundamental flaw in domains where visual features dictate preference. This proposal introduces the MASI framework, which is
+designed to encode both text and images into a single, unified
+generative token space.
+II. L ITERATURE S URVEY: T HE M ECHANICS OF M ODERN
+R ECOMMENDATION S YSTEMS
+This section provides a breakdown of the current state-ofthe-art to understand the necessity of multimodal SIDs.
+A. The Attention mechanism: Self-Attentive Sequential Rec
+(SASRec)
+The foundational pillar of personalization before GR, was
+the modeling of sequential user behavior. Early approaches
+used Markov Chains, but the breakthrough was the SelfAttentive Sequential Recommendation (SASRec) model [Kang
+and McAuley 2018].
+SASRec deploys the Transformer architecture for recommendation. Instead of words in a sentence, the input is represented as a sequence of item embeddings E = [e1 , e2 , . . . , en ].
+The item embeddings represent a user’s chronological clicks.
+SASRec employs multi-head self-attention to dynamically
+weigh historical interactions, allowing the model to capture
+both long-term preferences and short-term interactions without
+the rigid constraints posed by a Markov window. The attention
+mechanism computes a weighted sum of past items:
+
+
+QK T
+√
+Attention(Q, K, V ) = softmax
+V
+(1)
+d
+where Q, K, V are linear projections of the item embedding
+sequence.
+The Flaw: SASRec treats prediction as a huge multiclass classification problem over the entire item catalog |I|.
+At the final layer, it computes a dot product between the
+
+user’s sequence embedding and the item embedding matrix
+E ∈ R|I|×d . This creates a huge memory bottleneck (complexity O(|I|)). Moreover, as the item IDs are atomic one-hot
+vectors, a new item without any interaction history cannot be
+recommended (causing the cold-start problem).
+B. The LLM Shift: Recommendation as Language Processing
+To address the scaling and flexibility issues of SASRec,
+researchers proposed treating recommendation as a Natural
+Language Processing (NLP) task. The landmark P5 framework
+[Geng et al. 2022] demonstrated that recommendation could
+be unified within a standard encoder-decoder LLM (like T5).
+In P5, the input is modeled as a natural language prompt
+template: ”User A watched ’Breaking Bad’, ’Better Call Saul’.
+What will they watch next?” The model outputs a text string:
+”Narcos”.
+The Flaw: While conceptually elegant, P5 suffered from
+severe hallucination. Standard LLMs use sub-word tokenization (e.g., Byte-Pair Encoding). If an item is named ”iPhone
+15 Plus”, the LLM might generate ”iPhone 15 Pro” if the
+probabilistic token for ”Pro” was slightly higher. Generating
+raw text strings is too unconstrained for precise item retrieval.
+C. Hallucination’s Solution: Generative Retrieval & Semantic
+IDs
+To fix hallucination P5 suffered from, the community moved
+to Generative Retrieval, popularized by the TIGER framework
+[Rajput et al. 2023]. The model generates discrete, abstract tokens called ’Semantic Identifiers’ (SIDs), instead of generating
+English text.
+Each SID is structured as a hierarchical tuple, e.g., Si =
+⟨c1 , c2 , c3 ⟩. The hierarchy is strictly enforced: c1 might represent a broad cluster (Electronics), c2 a sub-cluster (mobile phones), and c3 the specific item (Apple iPhone 15).
+The auto-regressive model is then trained on these discrete
+tokens, thereby reducing the generation space from O(|I|)
+to O(D × |V|), where D is the tuple length and |V| is
+the small vocabulary size of the codebook. If the model
+generates a prefix ⟨c1 , c2 ⟩, it means that it has successfully
+narrowed the search space to a specific semantic cluster,
+thereby solving the hallucination problem and allowing for
+zero-shot recommendation of new items that share that prefix.
+D. The Mathematical Engine: RQ-VAE
+The current standard for generating SIDs is the Residual
+Quantized Variational Autoencoder (RQ-VAE) [Lee et al.
+2022]. Unlike standard clustering algorithms (like K-Means),
+RQ-VAE learns a structured hierarchy of embeddings.
+Given a continuous text embedding of an item z ∈ Rd
+(extracted via BERT), the RQ-VAE uses D sequential codebooks C = {C1 , . . . , CD }, where each codebook contains K
+trainable vectors.
+1) Level 1: The model finds the closest vector to z in C1 .
+Let its index be c1 .
+2) Compute Residual: The model subtracts the codebook
+vector from z to find the ”error” or residual: r1 = z −
+C1 (c1 ).
+
+3) Level 2: The model then quantizes the residual r1 using
+the second codebook C2 , yielding index c2 .
+This process repeats D times. The final SID is the sequence
+of indices (c1 , c2 , . . . , cD ). Mathematically, this forces a tree
+structure:
+• c1 captures the largest variance (broad category).
+• cD captures the smallest residual nuances (fine-grained
+item details).
+E. The Visual Gap and Multimodal Encoders
+The biggest shortcoming of current SID framework models
+like TIGER is their exclusive reliance on text. They only apply
+RQ-VAE to text embeddings. When dealing with highly visual
+categories (like fashion, home decor, or short-form video) textual descriptions are often incredibly sparse or completely
+identical for items that actually look different.
+To bridge this visual gap, we look at foundational visuallanguage models like CLIP (Contrastive Language-Image Pretraining) [Radford et al. 2021]. CLIP is trained with an
+InfoNCE contrastive loss, which mathematically forces the image’s embedding to be highly cosine-similar to the embedding
+of its text description, and dissimilar to unrelated texts. CLIP
+provides a unified latent space where visual features can be
+mathematically quantified alongside text descriptions.
+F. Recent Advances: 2025-2026 SOTA
+State-of-the-art research has identified several bottlenecks
+in early GR models, leading to a wave of new advanced
+frameworks:
+• Multimodal Fusion (CEMG): The CEMG framework
+addresses the superficial integration of collaborative signals by using them as queries to dynamically weigh visual
+and textual features during tokenization [Y. Lin et al.
+2026].
+• Differentiable Indexing (DIGER): To address the ”objective mismatch” where SIDs are optimized for reconstruction rather than recommendation, DIGER implements Gumbel-Softmax reparameterization that allows
+recommendation gradients to flow back to the codebook
+[Fu et al. 2026].
+• Long ID Potential (ACERec): ACERec decouples tokenization granularity from computational budget using
+an ”Attentive Token Merger,” allowing for expressive 32token IDs while also maintaining efficient inference [Xia
+et al. 2026].
+III. P ROBLEM F ORMULATION AND G AP A NALYSIS
+While foundational visual-language models like CLIP [Radford et al. 2021] bridge the visual-text gap, applying RQ-VAE
+to multimodal embeddings poses two critical limitations.
+A. Limitation 1: Modality Sensitivity and Early Fusion Collapse
+The intuitive approach to MGR is ”Early Fusion”: concatenating text and image embeddings before the RQ-VAE.
+Zhu et al. 2025 proved a flaw ’modality sensitivity’. During
+
+early fusion, one modality could mathematically dominate the
+representation space. Even recent dynamic weighing models
+like CEMG [Y. Lin et al. 2026] still operate within an earlyfusion architecture, leaving them fundamentally vulnerable to
+cross-modal noise and indexing collisions for visually distinct
+items sharing similar text.
+B. Limitation 2: The Semantic-Behavioral Gap
+Xu et al. 2025 identified the ’Semantic-Behavioral Gap’.
+An RQ-VAE trained solely on content assumes that items
+with similar aesthetics should receive similar SIDs. However,
+a designer black t-shirt and a budget black t-shirt, although
+visually identical, appeal and cater to entirely different user
+demographics. While advanced models like DIGER [Fu et al.
+2026] attempt to bridge this by end-to-end differentiable
+indexing, their Gumbel-Softmax routing is extremely unstable
+and complex to train. A more modular and stable pipeline
+is required to align semantic generation with actual user
+preferences.
+IV. P ROPOSED M ETHODOLOGY: MASI
+To resolve these bottlenecks, we propose the MultimodalAugmented Semantic ID (MASI) framework. MASI consists
+of three distinct phases that are designed to maximize modality
+independence and behavioral alignment.
+A. Phase 1: Behavior-Aware Contrastive Alignment
+To solve the Semantic-Behavioral Gap (Limitation 2), our
+representations must respect collaborative user signals. However, if we mix the modalities while learning these signals,
+we risk modality interference, where the model ignores visual
+nuances in favor of text. To prevent this, we isolate the
+training. We freeze the base CLIP encoders so they do not
+suffer from catastrophic forgetting, and we attach independent,
+learnable projection heads to each modality. This allows each
+modality to learn user preferences independently. For an item
+i with image Vi and text Ti :
+evis,i = Projv (CLIPvis (Vi )),
+
+etxt,i = Projt (CLIPtxt (Ti ))
+(2)
+Using a user-item bipartite graph G, we extract collaborative
+positive pairs (i, j + ). We then apply separate InfoNCE contrastive losses using mixed negative sampling Nmix (in-batch
++ hard graph negatives):
+exp(sim(evis,i , evis,j + )/τ )
+k∈Nmix exp(sim(evis,i , evis,k )/τ )
+
+Lvis = − log P
+
+(3)
+
+The total alignment loss ’Lbeh ’ is
+Lbeh = Lvis + Ltxt
+Handling Cold-Start: When a brand-new item is added to the
+catalog, it has no user interaction history (no edges in G),
+meaning we cannot calculate the behavioral loss Lbeh for it. To
+solve this, we simply pass the new item’s raw text and image
+through our previously trained projection heads. Because these
+heads have already learned the general rules of how content
+maps to user preferences (using the older, ”warm” items), the
+
+new items are automatically placed into the correct behavioral
+space without needing any prior clicks.
+B. Phase 2: Independent Modality Quantization (Late Fusion)
+To solve the problem of Modality Collapse (where text
+features often overpower visual features), we process the
+aligned text and image embeddings completely separately. By
+maintaining two entirely independent RQ-VAE pipelines, we
+ensure that the visual characteristics are matched to a dedicated
+visual codebook (C vis ), while the text characteristics are
+matched to a dedicated text codebook (C txt ). This guarantees
+that neither modality loses its unique information. For a given
+item i :
+Sivis = RQ-VAEvis (evis,i ) = ⟨cv1 , cv2 , . . . , cvD ⟩
+
+(4)
+
+Sitxt = RQ-VAEtxt (etxt,i ) = ⟨ct1 , ct2 , . . . , ctD ⟩
+
+(5)
+
+The final identifier is formed via Late Fusion with special
+modality tokens:
+Sif inal = [TXT] ◦ Sitxt ◦ [VIS] ◦ Sivis
+
+(6)
+
+C. Phase 3: Recommender-Side Cross-Modal Alignment
+As demonstrated by Zhu et al. 2025, utilizing separate codebooks does not inherently equip an autoregressive sequence
+model to comprehend cross-modal correlations. To bridge this,
+we introduce an auxiliary pre-training phase on the exact
+Transformer backbone used for downstream recommendations.
+Specifically, the model is trained to reconstruct visual tokens
+Sivis from textual tokens Sitxt (and vice versa) using a crossmodal Masked Language Modeling (MLM) objective. After
+this discrete alignment phase, the Transformer is finally finetuned on chronological user interaction sequences. In essence,
+Phase 1 ensures that the dense, continuous vectors respect
+user behavior before they enter the codebooks, while Phase
+3 ensures that the final, discrete SID tokens are cross-modally
+aligned for the autoregressive Transformer. We anticipate that
+these two stages operate synergistically (one organizes raw
+data and the other organizes the generative vocabulary) though
+we will conduct ablation studies to verify that they do not
+overlap in utility.
+V. T HEORETICAL E VALUATION AND N OVELTY
+A. Comparative Novelty Analysis
+MASI provides a streamlined alternative to recent SOTA
+paradigms (Table I).
+MASI vs. CEMG: Although CEMG dynamically weights
+collaborative signals, it does so within a vulnerable earlyfusion architecture. MASI proposes a collaboratively-aligned,
+yet architecturally separated, late-fusion approach, leading to
+modality independence during quantization.
+MASI vs. DIGER: Compared to DIGER’s elegant but
+unstable end-to-end differentiable indexing, MASI offers a
+pipeline-based alternative. Our staged approach (1. align continuous representations, 2. quantize independently, 3. align discrete sequences) is more modular, interpretable, and stable to
+train, while bridging the objective mismatch and the semanticbehavioral gaps.
+
+Algorithm 1 MASI Generation & Alignment Pipeline
+1: Input: User-Item Graph G, Images V , Texts T
+2: Phase 1: Behavior Alignment (Addressing Xu et al.
+2025)
+3: for batch (i, j + , N − ) in G do
+4:
+evis
+←
+Projv (CLIPvis (V )),
+etxt
+←
+Projt (CLIPtxt (T ))
+5:
+Compute Lvis and Ltxt using graph positives and
+mixed negatives.
+6:
+Update Projv and Projt via backprop (CLIP remains
+frozen).
+7: end for
+8: Phase 2: Independent Quantization (Addressing Zhu
+et al. 2025)
+9: S vis ← RQ-VAEvis (evis )
+10: S txt ← RQ-VAEtxt (etxt )
+11: S f inal ← Concat([TXT], S txt , [VIS], S vis )
+12: Phase 3: Sequence Pre-training & Fine-Tuning
+13: Pre-train Transformer on MLM task: Predict S vis from
+S txt .
+14: Fine-tune Transformer on user sequential interaction logs.
+15: return Trained MASI Recommender System
+
+(percentage of catalog successfully recommended), and Inference Latency (ms). Because tokenization is pre-computed,
+MASI’s online inference latency matches MGR-LF++.
+TABLE II
+E XPECTED C OMPARATIVE A NALYSIS TARGETS
+Model
+
+ID Type
+
+Cold-Start HR
+
+Cov@10
+
+Lat.(ms)
+
+SASRec
+CEMG
+MGR-LF++
+DIGER
+
+Atomic
+Vis+Text
+Vis+Text
+Text SID
+
+0.000
+∼0.035
+∼0.045
+∼0.050
+
+12%
+42%
+55%
+52%
+
+15
+85
+65
+50
+
+MASI
+
+Late+Beh.
+
+>0.055
+
+>65%
+
+65
+
+C. Ablation Studies
+We will conduct rigorous ablations to isolate contributions:
+1) Phase 1 vs. 3 Synergy: MASI with vs. without Contrastive InfoNCE; with vs. without Recommender-side
+MLM to test relative redundancy.
+2) ID Length: Varying RQ-VAE depth (D ∈ {2, 3, 4}).
+D. Implementation Timeline (8 Weeks) & Feasibility
+
+TABLE I
+A RCHITECTURAL N OVELTY C OMPARISON
+Framework
+
+Fusion Type
+
+Behavior Align
+
+Rec-Alignment
+
+Complexity
+
+CEMG (2025)
+DIGER (2026)
+MGR-LF++
+
+Early
+Text-Only
+Late
+
+Dynamic Weight
+End-to-End
+None
+
+None
+None
+Yes (Tokens)
+
+High
+Very High
+Medium
+
+MASI (Ours)
+
+Late
+
+Proj. InfoNCE
+
+Yes (Tokens)
+
+Medium
+
+B. Mathematical Soundness of Dual Codebooks
+Because we separate the quantization process (with the dualcodebook approach), the mathematical updates (gradients)
+for the visual loss (∇LRQ vis ) only ever affect the visual
+codebook (C vis ) and embedding (evis ). By enforcing this
+strict architectural boundary, we mathematically prevent the
+text modality from overpowering the visual nuances during
+training. This directly resolves the modality collapse problem
+identified in early-fusion models.
+VI. E XPERIMENTAL D ESIGN AND I MPLEMENTATION P LAN
+A. Dataset Configuration
+We will utilize the Amazon Reviews 2023 Dataset Lab
+2023, filtering the ”Clothing, Shoes, and Jewelry” subset (5core strategy) to yield ∼100,000 active users and ∼50,000
+items with valid high-resolution images.
+B. Evaluation Protocol & Baselines
+Employing a Leave-One-Out (LOO) protocol, we will partition the test set into Warm-Start and Zero-Shot Cold-Start.
+Metrics will include HR@10, NDCG@10, Coverage@10
+
+We will implement the dual-codebook quantization and
+contrastive graph sampling by leveraging modern AI-assisted
+coding agents (Google Gemini, GitHub Copilot) for rapid
+generation of code boilerplates (like PyTorch data-loader boilerplate and for parsing RecBole’s internal abstractions).
+• Week 1-2: Amazon 2023 ETL pipelines. Extract CLIP
+vectors.
+• Week 3-4: Construct bipartite graphs; implement Phase
+1 mixed negative sampling and train projection heads.
+• Week 5-6: Train Phase 2 dual RQ-VAEs. Implement
+Phase 3 MLM pre-training within RecBole.
+• Week 7-8: Execute generative fine-tuning, conduct LOO
+evaluations/ablations, and finalize the IEEE manuscript.
+VII. L IMITATIONS AND F UTURE W ORK
+MASI vs. ACERec: While MASI’s late-fusion dualcodebook approach could prove to solve modality collapse, it
+doubles the generative sequence length per item (2D tokens).
+We treat this as an accepted trade-off for capturing rich
+and independent multimodal representations. Future work will
+tackle the resulting linear increase in inference latency by
+incorporating ACERec’s [Xia et al. 2026] Attentive Token
+Merging to compress the S f inal representation prior to decoding, optimizing efficiency without sacrificing multimodal
+granularity.
+VIII. C ONCLUSION
+Generative Recommendation’s efficacy is bound by item
+representations. By going through 2025-2026 SOTA literature, we identified that basic multimodal extensions suffer
+from modality collapse and behavioral misalignment. The
+MASI framework tries to rectify these flaws through Independent Modality Quantization, Behavior-Aware Alignment,
+
+and Cross-Modal Sequence Modeling, ensuring the generative
+engine benefits from true visual features and collaborative
+utilities to solve cold-start discovery.
+R EFERENCES
+[1] J. Zhu et al., “Beyond Unimodal Boundaries: Generative Recommendation with Multimodal Semantics,” arXiv preprint arXiv:2503.23333,
+2025.
+[2] Y. Xu et al., “MMQ: Multimodal Mixture-of-Quantization Tokenization
+for Semantic ID Generation and User Behavioral Adaptation,” arXiv
+preprint arXiv:2508.15281, 2025.
+[3] Y. Lin et al., “CEMG: Collaborative-Enhanced Multimodal Generative
+Recommendation,” in International Conference on Multimedia Modeling, Springer, 2026, pp. 508–521.
+[4] J. Fu et al., “Differentiable Semantic ID for Generative Recommendation,” arXiv preprint arXiv:2601.19711, 2026.
+[5] M. Xia et al., “Unleash the Potential of Long Semantic IDs for
+Generative Recommendation,” arXiv preprint arXiv:2602.13573, 2026.
+[6] Z. Yang et al., “Gr-llms: Recent advances in generative recommendation
+based on large language models,” arXiv preprint arXiv:2507.06507,
+2025.
+[7] S. Liang and Y. Zhang, “Generative Recommendation: A Survey of
+Models, Systems, and Industrial Advances,” Preprints, 2025.
+[8] W.-C. Kang and J. McAuley, “Self-attentive sequential recommendation,” in ICDM, 2018.
+[9] A. Singh et al., “Better generalization with semantic ids: A case study
+in ranking for recommendations,” in RecSys, 2024.
+[10] S. Rajput et al., “Recommender Systems with Generative Retrieval,” in
+NeurIPS, 2023.
+[11] N. Zeghidour et al., “SoundStream: An End-to-End Neural Audio
+Codec,” IEEE/ACM TASLP, 2021.
+[12] D. Lee et al., “Autoregressive Image Generation using Residual Quantization,” in CVPR, 2022.
+[13] A. Radford et al., “Learning transferable visual models from natural
+language supervision,” in ICML, 2021.
+[14] S. Geng et al., “Recommendation as language processing (rlp): A unified
+pretrain, fine-tune, and predict paradigm,” in RecSys, 2022.
+[15] RecBole Team, “RecBole: A Unified Recommendation Library,” 2024.
+https://recbole.io/
+[16] McAuley Lab, “Amazon Reviews 2023 Dataset,” 2023. https://
+amazon-reviews-2023.github.io/
+
+

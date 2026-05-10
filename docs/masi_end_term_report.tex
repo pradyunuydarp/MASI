@@ -1,0 +1,243 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage[hyphens]{url}
+\usepackage{hyperref}
+
+\begin{document}
+
+\title{MASI: Multimodal-Augmented Semantic Identifiers for Cold-Start Discovery in Generative Recommendation}
+
+\author{
+\IEEEauthorblockN{Pradyun Devarakonda}
+\IEEEauthorblockA{\url{Devarakonda.Pradyun@iiitb.ac.in}}
+\and
+\IEEEauthorblockN{Rajanala Dheeraj}
+\IEEEauthorblockA{\url{Rajanala.Saidheeraj@iiitb.ac.in}}
+}
+
+\maketitle
+
+\begin{abstract}
+Generative recommendation reframes next-item discovery as sequence generation over discrete item identifiers. This makes the identifier design a central modeling choice: atomic identifiers are brittle for unseen items, while text-only semantic identifiers can miss visual preference signals in domains such as fashion and e-commerce. This paper presents MASI, a multimodal generative recommendation framework that constructs item identifiers from both textual and visual content while preserving modality-specific structure. MASI uses frozen CLIP encoders with trainable behavior-aware projection heads, independent residual quantizers for text and image embeddings, late-fused semantic identifier sequences with modality markers, and recommender-side cross-modal token pretraining before sequential fine-tuning. The implementation targets Amazon Reviews 2023 Clothing, Shoes, and Jewelry with deterministic warm-start and zero-shot cold-start evaluation. Current experiments are still in progress and use only bounded chunks of a much larger prepared corpus because full training is constrained by memory, storage, and GPU session limits. Preliminary bounded runs show increasing warm-start HR@10 as the training slice grows, but zero-shot cold-start HR@10 remains unresolved. These results should therefore be read as evidence that the MASI pipeline is operational under constrained resources, not as final validation of the cold-start claim.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Generative Recommendation, Semantic Identifiers, Cold-Start Recommendation, CLIP, RQ-VAE, Multimodal Recommendation, Amazon Reviews 2023.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Modern digital platforms process billions of interactions daily, historically relying on a rigid, multi-stage discriminative pipeline: a fast retrieval model surfaces candidates, followed by a computationally heavy ranking model to score them. However, the reasoning and generative capabilities of Large Language Models (LLMs) have catalyzed a paradigm shift toward Generative Recommendation (GR) \cite{liang2025generative}. In GR, recommendation is no longer framed as a massive classification or scoring problem, but rather as a conditional sequence generation task. Given a user's chronological interaction history, the model autoregressively ``writes'' the identifier of the next item \cite{rajput2023recommender,yang2025gr}.
+
+While this formulation bypasses the memory bottlenecks of catalog-sized classification heads, it shifts the core challenge to the indexing strategy: how are items encoded into discrete, generative tokens? Traditional atomic IDs (e.g., assigning ID\_1051 to an item) are semantically hollow. When a new item is introduced, its atomic ID lacks a learned embedding, resulting in the cold-start problem. Semantic Identifiers (SIDs) address this by representing each item as a sequence of hierarchical codewords derived from content \cite{singh2024better,lee2022autoregressive}.
+
+Currently, SIDs are generated almost exclusively from textual metadata. In visual-heavy domains like e-commerce and short-form video, this unimodal reliance creates a severe ``semantic-visual gap.'' Product titles and descriptions are often sparse, duplicated, or insufficient to capture user preference. Two visually distinct products might share nearly identical text, while visually similar items might serve different behavioral niches. A purely textual SID fails to capture these nuances, and existing multimodal extensions often suffer from modality collapse, where one modality overshadows the other.
+
+To solve these problems, this paper introduces the Multimodal-Augmented Semantic ID (MASI) framework. MASI addresses the semantic-visual gap by encoding both text and images into a single, unified generative token space without sacrificing modality-specific nuances. Our approach eschews traditional early-fusion techniques. Instead, we propose a modular pipeline: (1) behavior-aware contrastive alignment over frozen CLIP encoders via trainable projection heads, (2) independent residual quantization of text and image representations, and (3) a modality-specific late-fusion strategy that generates a unified token sequence. This sequence is then used to train a Transformer recommender via cross-modal masked-token pretraining followed by sequential fine-tuning.
+
+The contribution of this work is a proposal-faithful implementation of MASI and an initial empirical study. Due to realistic compute constraints, the current experiments operate on deterministic bounded chunks of the Amazon Reviews 2023 Clothing, Shoes, and Jewelry dataset rather than the full corpus. Therefore, this paper presents preliminary training behavior, implementation artifacts, and operational pipeline diagnostics, laying the foundational framework for improving zero-shot, cold-start discovery in visual-heavy domains.
+
+\section{Related Work}
+\subsection{Sequential Recommendation}
+SASRec introduced self-attention for sequential recommendation by modeling user histories as ordered item sequences \cite{kang2018self}. It captures short-term and long-term preferences more flexibly than Markov-chain methods, but the standard prediction head scores over the item catalog and depends on learned item embeddings. This makes cold-start discovery difficult for items with little or no interaction history.
+
+\subsection{Generative Recommendation and Semantic IDs}
+Generative recommendation replaces catalog scoring with sequence generation \cite{rajput2023recommender,geng2022recommendation}. TIGER-style generative retrieval uses semantic identifiers generated by residual quantization, allowing items with related content to share code prefixes. Residual quantization hierarchically decomposes an item embedding into a sequence of codebook indices, reducing the output space from item IDs to reusable discrete tokens \cite{lee2022autoregressive}.
+
+\subsection{Multimodal Recommendation}
+CLIP provides a practical foundation for joint text-image representation learning \cite{radford2021learning}. However, directly fusing text and image embeddings before quantization can introduce modality interference: one modality may dominate the shared representation and cause collisions or loss of visually important detail. Recent multimodal generative recommendation work investigates collaborative-enhanced tokenization, mixture-of-quantization, differentiable indexing, and longer semantic IDs \cite{zhu2025beyond,xu2025mmq,lin2026cemg,fu2026differentiable,xia2026unleash}. MASI differs by separating modality quantization until after discrete code assignment, while using behavior-aware alignment before quantization and cross-modal token alignment inside the recommender.
+
+\section{Problem Formulation}
+Let $\mathcal{U}$ denote users, $\mathcal{I}$ denote items, and $H_u = (i_1,\ldots,i_t)$ denote the chronological interaction history of user $u$. The goal is to generate the next item $i_{t+1}$ as a semantic token sequence rather than score every item with an atomic ID. Each item $i$ has text metadata $T_i$ and an image $V_i$. MASI constructs a fused identifier:
+\begin{equation}
+S_i =
+\texttt{[TXT]} \circ \langle c^t_1,\ldots,c^t_D\rangle
+\circ \texttt{[VIS]} \circ \langle c^v_1,\ldots,c^v_D\rangle,
+\end{equation}
+where $D$ is the residual quantization depth, $c^t_d$ is a text-code index, and $c^v_d$ is a visual-code index.
+
+The recommender learns:
+\begin{equation}
+p(S_{i_{t+1}} \mid S_{i_1}, \ldots, S_{i_t}),
+\end{equation}
+then ranks candidate items by the likelihood of their semantic identifier under the generated context. The primary evaluation targets are HR@10, NDCG@10, Coverage@10, and inference latency, measured separately for warm-start and zero-shot cold-start splits.
+
+\section{Method}
+\subsection{Behavior-Aware Multimodal Alignment}
+MASI starts from frozen CLIP encoders and trains lightweight projection heads for each modality:
+\begin{equation}
+e^t_i = P_t(\mathrm{CLIP}_{text}(T_i)),
+\quad
+e^v_i = P_v(\mathrm{CLIP}_{image}(V_i)).
+\end{equation}
+The frozen encoders preserve pretrained multimodal knowledge, while the projection heads adapt representations to collaborative behavior. Positive item pairs are extracted from user histories using local chronological windows. Negative examples combine in-batch negatives with graph-aware hard negatives sampled from the user-item interaction graph.
+
+The training objective is the sum of modality-specific InfoNCE losses:
+\begin{equation}
+\mathcal{L}_{align} =
+\mathcal{L}_{InfoNCE}(e^t_i,e^t_j,\mathcal{N})
++
+\mathcal{L}_{InfoNCE}(e^v_i,e^v_j,\mathcal{N}),
+\end{equation}
+where $(i,j)$ is a collaborative positive pair and $\mathcal{N}$ is the mixed negative set. Keeping the losses separate prevents text and vision from being forced into a single fused vector before quantization.
+
+\subsection{Independent Residual Quantization}
+After alignment, MASI trains separate residual quantizers for text and vision. Each modality has its own encoder, residual codebooks, and decoder. For a representation $z$, the first codebook selects the nearest vector, the residual is computed, and subsequent codebooks quantize the remaining error. This yields two code sequences:
+\begin{equation}
+S^t_i = \langle c^t_1,\ldots,c^t_D\rangle,
+\quad
+S^v_i = \langle c^v_1,\ldots,c^v_D\rangle.
+\end{equation}
+
+The implemented bounded profiles use $D=3$ with $K=128$ codes per residual level. A larger deferred configuration uses $K=256$. For small or bounded runs, residual k-means refitting is available after neural RQ-VAE training to reduce code collapse. This is a practical stabilization step for constrained experiments, while the core MASI design remains independent modality quantization followed by late fusion.
+
+\subsection{Late-Fused Semantic Identifiers}
+The final item identifier concatenates text and visual codes with explicit modality markers:
+\begin{equation}
+S^{final}_i =
+\texttt{[TXT]} \circ S^t_i \circ \texttt{[VIS]} \circ S^v_i.
+\end{equation}
+Late fusion preserves separate modality codebooks and makes the recommender aware of which tokens come from text and which come from vision. This is intended to reduce modality collapse while still giving the sequence model a unified token space.
+
+\subsection{Cross-Modal Pretraining and Sequential Fine-Tuning}
+The recommender stack contains two Transformer objectives. First, a cross-modal masked-token model predicts visual tokens from visible text tokens and text tokens from visible visual tokens. Second, an autoregressive generative recommender is fine-tuned on chronological user histories to predict the next item's fused semantic ID. When cross-modal pretraining is enabled, compatible weights are transferred into the generative recommender before sequential fine-tuning.
+
+Candidate ranking is likelihood-based: for each candidate item, the model scores the fused token sequence conditioned on the user history. Evaluation uses deterministic leave-one-out warm-start and zero-shot cold-start splits.
+
+\section{Experimental Setup}
+\subsection{Dataset}
+The target dataset is Amazon Reviews 2023 Clothing, Shoes, and Jewelry \cite{amazon_reviews_2023}. The active workflow is subset-first because the raw review dump, metadata, images, CLIP model, embeddings, and checkpoints exceed the limits of a single ephemeral training session. The prepared dataset contains:
+\begin{itemize}
+    \item selected review/interactions JSONL records,
+    \item selected item metadata JSONL records,
+    \item one downloaded image per selected item when available,
+    \item subset and image-download manifests.
+\end{itemize}
+
+The largest prepared local snapshot was built with 5-core filtering and deterministic caps of 102,400 users, 204,800 items, and 20,000,000 scanned review records. It scanned 14,616,203 valid review records, retained 7,596,916 interaction rows after filtering, and materialized 2,384,591 selected review rows for 102,400 users and 137,635 selected items. The image cache contains 134,161 successfully available item images, with 3,451 failed image downloads and 23 items without usable image URLs.
+
+\begin{table}[t]
+\centering
+\caption{Prepared CSJ dataset snapshot used as the source for bounded MASI training chunks.}
+\label{tab:prepared_dataset}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\columnwidth}{@{}lXr@{}}
+\toprule
+\textbf{Artifact} & \textbf{Role} & \textbf{Count} \\
+\midrule
+Review rows & selected interactions & 2,384,591 \\
+Metadata rows & selected item records & 137,635 \\
+Selected users & deterministic user cap & 102,400 \\
+Selected items & item universe before image failures & 137,635 \\
+Available item images & local validated images & 134,161 \\
+Failed image downloads & selected items without image files & 3,451 \\
+Missing image URLs & metadata records without usable URLs & 23 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Training Environment}
+Training is executed through reproducible JSON configs and a Kaggle-safe notebook workflow. The current bounded profiles are designed around memory and session constraints. The largest active profile uses 12,288 users, 24,576 items, CLIP batch size 16, 10 behavior-alignment epochs, 30 RQ-VAE epochs, 10 cross-modal MLM epochs, and 30 autoregressive epochs. Evaluation is capped at 1,024 candidates per example with candidate batches of 128. These settings are intentionally below the prepared dataset size and far below the raw corpus scale.
+
+\subsection{Metrics}
+The evaluation computes HR@10, NDCG@10, Coverage@10, and average ranking latency. Warm-start examples hold out interactions for items seen during sequential training. Zero-shot cold-start examples hold out items from sequential next-item training and therefore test whether content-derived semantic IDs and cross-modal structure can support discovery without item-specific interaction updates.
+
+\section{Preliminary Results}
+Training is still in progress. The current metrics come from small bounded chunks of a much larger dataset and are highly constrained by available compute, memory, storage, and Kaggle session duration. They are not final full-dataset results and should not be compared as completed benchmark numbers against prior systems. Their main purpose is to verify that the full MASI pipeline can train, checkpoint, resume, and evaluate under constrained conditions.
+
+\begin{table*}[t]
+\centering
+\caption{Preliminary bounded MASI runs. Each row uses only a constrained chunk of the prepared CSJ dataset, not the full prepared corpus.}
+\label{tab:preliminary_results}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabularx}{\textwidth}{@{}lrrrrrrr@{}}
+\toprule
+\textbf{Profile} & \textbf{Users} & \textbf{Items} & \textbf{Train Ex.} & \textbf{Warm HR@10} & \textbf{Warm NDCG@10} & \textbf{Cold HR@10} & \textbf{Cold NDCG@10} \\
+\midrule
+\texttt{smoke\_safe} & 373 & 1008 & 9585 & 0.04248 & 0.03322 & 0.00000 & 0.00000 \\
+\texttt{scaled\_safe} & 4071 & 8078 & 91935 & 0.08262 & 0.05229 & 0.00000 & 0.00000 \\
+\texttt{long\_safe} & 12286 & 24199 & 309264 & 0.12010 & 0.07243 & 0.00000 & 0.00000 \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+Warm-start performance improves as the bounded training slice grows. HR@10 increases from 0.04248 in the smoke run to 0.12010 in the largest saved run, and NDCG@10 increases from 0.03322 to 0.07243. This suggests that the sequential training and likelihood-based ranking path are functioning for seen-item recommendation.
+
+Cold-start HR@10 and NDCG@10 remain zero in the saved runs. This is the main unresolved scientific issue. The saved logs show nonzero cold Coverage@10, so the model is not simply recommending the same small set of items for every cold example. The more likely failure mode is that cold-item token likelihoods are not yet ranked highly enough, possibly because the bounded chunks provide insufficient cross-modal pretraining signal, because cold split construction is too strict for the current training scale, or because tokenization quality is not yet behaviorally aligned enough for unseen items.
+
+The latest saved \texttt{long\_safe} run records average evaluation latency of approximately 682 ms per evaluated user over 1,024 sampled candidates. This is a constrained evaluator latency, not a production retrieval latency, because the current implementation scores bounded candidate pools directly rather than using a full indexed retrieval structure.
+
+\section{Discussion}
+The preliminary results support two conclusions. First, MASI has been implemented as an executable end-to-end pipeline: CLIP feature extraction, behavior-aware alignment, independent residual quantization, late-fused semantic ID generation, cross-modal MLM, autoregressive fine-tuning, and warm/cold evaluation all run from reproducible configs. Second, the current experiments do not yet establish the core cold-start claim. They show warm-start learning under scale increases, but cold-start ranking needs further diagnosis.
+
+The resource constraint is central to interpreting the numbers. The prepared dataset contains over two million selected review rows and more than one hundred thousand item metadata records, but the largest saved training run uses about 12K users and 24K items. Full MASI training also requires image loading, CLIP embedding extraction, graph-positive construction, hard-negative sampling, RQ-VAE training, Transformer pretraining, sequential fine-tuning, and ranking evaluation. These stages compete for GPU memory, CPU memory, disk space, and wall-clock time. Current runs therefore prioritize resumable bounded training over single-pass full-corpus execution.
+
+The implementation also exposes practical design tradeoffs. Custom PyTorch modules were used instead of a library-first recommender stack to control token serialization, cross-modal masks, checkpointing, and likelihood-based retrieval. Bounded RQ-VAE runs can use residual k-means refitting to reduce code collapse. Candidate scoring is capped until an indexed retrieval path is implemented. These choices preserve the main MASI architecture while making experiments feasible under available resources.
+
+\section{Limitations and Future Work}
+Several limitations remain before MASI can be evaluated as a completed research system:
+\begin{itemize}
+    \item training has not yet covered the full prepared dataset in one coherent full-corpus run;
+    \item zero-shot cold-start HR@10 remains zero in saved bounded runs;
+    \item multimodal baselines such as CEMG, MGR-LF++, and DIGER are not yet reproduced on the same splits;
+    \item ablations for behavior-aware alignment, cross-modal MLM, modality variants, and code depth $D \in \{2,3,4\}$ are still pending;
+    \item evaluation currently scores capped candidate pools instead of a full indexed retrieval structure;
+    \item sharded CLIP embedding persistence is needed to move beyond in-memory training chunks.
+\end{itemize}
+
+The next experiments should continue resumed \texttt{long\_safe} training across additional chunks, inspect cold-item token assignments and likelihood ranks, compare Phase 1 and Phase 3 toggles, and add baseline rows only after the baselines are run under the same deterministic data and split contract.
+
+\section{Conclusion}
+MASI proposes a multimodal semantic identifier pipeline for cold-start generative recommendation. The core idea is to avoid early multimodal collapse by aligning text and vision separately with behavior-aware projection heads, quantizing each modality independently, and late-fusing the resulting codes for generative recommendation. The current implementation demonstrates that this pipeline can be executed reproducibly on Amazon Reviews 2023 Clothing, Shoes, and Jewelry under bounded resource conditions. Preliminary runs show improving warm-start recommendation as the training slice grows, while cold-start ranking remains unresolved. The main result at this stage is therefore an operational, extensible MASI pipeline and a clear experimental path toward validating or revising the cold-start hypothesis.
+
+\begin{thebibliography}{00}
+\bibitem{yang2025gr}
+Z. Yang, H. Lin, Z. Zhang, and others, ``Gr-llms: Recent advances in generative recommendation based on large language models,'' \emph{arXiv preprint arXiv:2507.06507}, 2025.
+
+\bibitem{liang2025generative}
+S. Liang and Y. Zhang, ``Generative Recommendation: A Survey of Models, Systems, and Industrial Advances,'' \emph{Preprints}, 2025.
+
+\bibitem{kang2018self}
+W.-C. Kang and J. McAuley, ``Self-attentive sequential recommendation,'' in \emph{2018 IEEE International Conference on Data Mining}, 2018, pp. 197--206.
+
+\bibitem{singh2024better}
+A. Singh, T. Vu, N. Mehta, and others, ``Better generalization with semantic ids: A case study in ranking for recommendations,'' in \emph{Proceedings of the 18th ACM Conference on Recommender Systems}, 2024, pp. 1039--1044.
+
+\bibitem{rajput2023recommender}
+S. Rajput and others, ``Recommender Systems with Generative Retrieval,'' in \emph{Advances in Neural Information Processing Systems}, 2023.
+
+\bibitem{geng2022recommendation}
+S. Geng, S. Liu, Z. Fu, and others, ``Recommendation as language processing (rlp): A unified pretrain, fine-tune, and predict paradigm,'' in \emph{Proceedings of the 15th ACM Conference on Recommender Systems}, 2022, pp. 429--439.
+
+\bibitem{radford2021learning}
+A. Radford, J. W. Kim, C. Hallacy, and others, ``Learning transferable visual models from natural language supervision,'' in \emph{International Conference on Machine Learning}, 2021, pp. 8748--8763.
+
+\bibitem{lee2022autoregressive}
+D. Lee, C. Kim, S. Kim, M. Cho, and W.-S. Han, ``Autoregressive image generation using residual quantization,'' in \emph{Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition}, 2022, pp. 11523--11532.
+
+\bibitem{zhu2025beyond}
+J. Zhu, M. Ju, Y. Liu, D. Koutra, N. Shah, and T. Zhao, ``Beyond Unimodal Boundaries: Generative Recommendation with Multimodal Semantics,'' \emph{arXiv preprint arXiv:2503.23333}, 2025.
+
+\bibitem{xu2025mmq}
+Y. Xu, M. Zhang, C. Li, and others, ``MMQ: Multimodal Mixture-of-Quantization Tokenization for Semantic ID Generation and User Behavioral Adaptation,'' \emph{arXiv preprint arXiv:2508.15281}, 2025.
+
+\bibitem{lin2026cemg}
+Y. Lin, H. Chen, X. Chen, S. Wang, I. Xu, and D. Jiang, ``CEMG: Collaborative-Enhanced Multimodal Generative Recommendation,'' in \emph{International Conference on Multimedia Modeling}, 2026, pp. 508--521.
+
+\bibitem{fu2026differentiable}
+J. Fu, X. Ge, A. Karatzoglou, I. Arapakis, S. Verberne, J. M. Jose, and Z. Ren, ``Differentiable Semantic ID for Generative Recommendation,'' \emph{arXiv preprint arXiv:2601.19711}, 2026.
+
+\bibitem{xia2026unleash}
+M. Xia, Z. Zhou, G. Ma, and D. Huang, ``Unleash the Potential of Long Semantic IDs for Generative Recommendation,'' \emph{arXiv preprint arXiv:2602.13573}, 2026.
+
+\bibitem{amazon_reviews_2023}
+McAuley Lab, ``Amazon Reviews 2023 Dataset,'' 2023. [Online]. Available: \url{https://amazon-reviews-2023.github.io/}
+\end{thebibliography}
+
+\end{document}
