@@ -45,6 +45,18 @@ The proposal compares MASI against:
 
 These baselines define the evaluation bar for cold-start hit rate, coverage, and efficiency.
 
+## Baseline Notebooks
+
+The repository now includes same-dataset baseline notebooks for the current full-CSJ bounded profile:
+
+- [notebooks/09_sasrec_baseline_full_dataset.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/09_sasrec_baseline_full_dataset.ipynb): exact SASRec-style sequential ID baseline using the same leave-one-out warm/cold split contract as MASI.
+- [notebooks/10_cemg_proxy_baseline_full_dataset.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/10_cemg_proxy_baseline_full_dataset.ipynb): CEMG-style early-fused token-stream proxy with late-fusion markers and cross-modal MLM disabled.
+- [notebooks/11_diger_proxy_baseline_full_dataset.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/11_diger_proxy_baseline_full_dataset.ipynb): DIGER-style static semantic-ID control with fixed MASI/proxy item tokens and cross-modal MLM disabled.
+
+The CEMG and DIGER notebooks are explicitly documented proxies, not exact paper reproductions. Exact CEMG still needs collaborative-guided multimodal fusion and unified fused-representation RQ-VAE tokenization. Exact DIGER still needs joint differentiable tokenizer/recommender training with Gumbel-based semantic-ID learning. Until those components land, the proxy notebooks provide reproducible comparison rows on the same CSJ split and metric protocol.
+
+Baseline outputs are written under `outputs/baselines/...` locally, or under `/kaggle/working/masi_artifacts/outputs/...` on Kaggle. The Kaggle bootstrap cells are rerun-safe: before replacing `/kaggle/working/MASI`, they switch back to `/kaggle/working` and run `git clone` from that stable working directory.
+
 ## Repository Documents
 
 - [AGENTS.md](/Users/pradyundevarakonda/Developer/MASI/AGENTS.md): operating instructions for AI agents working in this repository
@@ -52,6 +64,7 @@ These baselines define the evaluation bar for cold-start hit rate, coverage, and
 - [Multimodal_Augmented_Semantic_Identifiers_for_Cold_Start_Discovery_in_Generative_Recommendation__Research_Proposal.pdf](/Users/pradyundevarakonda/Developer/MASI/Multimodal_Augmented_Semantic_Identifiers_for_Cold_Start_Discovery_in_Generative_Recommendation__Research_Proposal.pdf): source proposal
 - [docs/technical_design.md](/Users/pradyundevarakonda/Developer/MASI/docs/technical_design.md): proposal-to-code translation with module boundaries and artifact contracts
 - [docs/training_process.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/training_process.md): implemented training-process explanation for CLIP, Phase 1 alignment, RQ-VAE tokenization, and Phase 3 Transformer training
+- [docs/training_process_latest.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/training_process_latest.md): latest notebook-grounded training-process guide for `notebooks/08_full_dataset_pipeline.ipynb`, including model roles, tensor dimensions, epoch meanings, and current `long_safe` hyperparameters
 - [docs/Kaggle_Notebook_logs.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/Kaggle_Notebook_logs.md): Kaggle notebook run log covering setup fixes, Hugging Face handling, OOM/SIGKILL lessons, and current bounded runtime contract
 - [docs/kaggle_full_dataset_scaleup_journey.md](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/docs/kaggle_full_dataset_scaleup_journey.md): interpretation of the saved Kaggle output notebook and the next safe scale-up profile for warm/cold metric improvement
 - [docs/reference_repos.md](/Users/pradyundevarakonda/Developer/MASI/docs/reference_repos.md): working map of foundational papers and public repositories relevant to MASI
@@ -67,7 +80,7 @@ These baselines define the evaluation bar for cold-start hit rate, coverage, and
 - `notebooks/`: demo notebooks that exercise repository workflows
 - `outputs/`: manifests, summaries, and future experiment results
 - `scripts/`: CLI entrypoints that wrap reusable library code
-- `src/masi/`: library modules for data, alignment, tokenization, and recommender stages
+- `src/masi/`: library modules for data, alignment, tokenization, recommender stages, and baseline runners
 
 ## Hardware Assumptions
 
@@ -224,8 +237,11 @@ Implemented artifacts:
 - [src/masi/recommender/generative.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/generative.py): decoder-style semantic-ID generator inspired by TIGER
 - [src/masi/recommender/mlm.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/mlm.py): cross-modal masked-token pretraining model
 - [src/masi/recommender/training.py](/Users/pradyundevarakonda/Developer/MASI/src/masi/recommender/training.py): training helpers for demo runs and early regression checks
+- [src/masi/baselines/sasrec.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/src/masi/baselines/sasrec.py): same-split SASRec training and warm/cold ranking evaluation
+- [scripts/run_sasrec_baseline.py](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/scripts/run_sasrec_baseline.py): config-driven SASRec baseline runner for local and Kaggle runs
 - [scripts/demo_recommender_foundation.py](/Users/pradyundevarakonda/Developer/MASI/scripts/demo_recommender_foundation.py): synthetic end-to-end recommender demo
 - [notebooks/02_recommender_foundation_demo.ipynb](/Users/pradyundevarakonda/Developer/MASI/notebooks/02_recommender_foundation_demo.ipynb): demo notebook for the recommender stack
+- [notebooks/09_sasrec_baseline_full_dataset.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/09_sasrec_baseline_full_dataset.ipynb), [notebooks/10_cemg_proxy_baseline_full_dataset.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/10_cemg_proxy_baseline_full_dataset.ipynb), and [notebooks/11_diger_proxy_baseline_full_dataset.ipynb](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/notebooks/11_diger_proxy_baseline_full_dataset.ipynb): same-dataset baseline metric notebooks
 
 Verified demo artifact:
 
@@ -298,6 +314,7 @@ Main artifacts:
 - [configs/masi_experiment_amazon_csj_demo.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_experiment_amazon_csj_demo.json)
 - [configs/masi_train_csj_subset_large.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/masi_train_csj_subset_large.json)
 - [configs/masi_train_csj_full.json](/Users/pradyundevarakonda/Developer/MASI/configs/masi_train_csj_full.json)
+- [configs/baseline_sasrec_full_dataset.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/baseline_sasrec_full_dataset.json), [configs/baseline_cemg_proxy_full_dataset.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/baseline_cemg_proxy_full_dataset.json), and [configs/baseline_diger_proxy_full_dataset.json](/home/dheerajKDE/Documents/College/sem8/Rec_sys/MASI/configs/baseline_diger_proxy_full_dataset.json)
 
 Verified experiment artifact:
 

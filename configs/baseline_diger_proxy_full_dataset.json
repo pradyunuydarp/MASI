@@ -1,0 +1,59 @@
+{
+  "seed": 7,
+  "runtime": {
+    "device": "auto",
+    "log_device_summary": true
+  },
+  "baseline_note": {
+    "name": "diger_static_sid_proxy",
+    "status": "proposal-aligned proxy, not an exact DIGER reproduction",
+    "reason": "The repo does not yet implement DIGER's joint differentiable tokenizer/recommender training with Gumbel exploration and uncertainty decay. This config keeps semantic IDs fixed and disables MASI's cross-modal MLM, giving a static two-stage SID control on the same CSJ split until exact DIGER code is integrated."
+  },
+  "history_max_tokens": 128,
+  "target_max_tokens": null,
+  "mlm_max_tokens": null,
+  "batch_size": 32,
+  "learning_rate": 0.0008,
+  "hidden_dim": 128,
+  "num_heads": 4,
+  "num_layers": 3,
+  "dropout": 0.1,
+  "mlm_epochs": 0,
+  "autoregressive_epochs": 30,
+  "top_k": 10,
+  "max_eval_candidates": 1024,
+  "eval_candidate_batch_size": 128,
+  "cold_start_ratio": 0.2,
+  "min_train_history": 1,
+  "min_sequence_items": 2,
+  "outputs_root": "outputs/baselines/diger_proxy_full_dataset",
+  "checkpoint_root": "outputs/baselines/diger_proxy_full_dataset/checkpoints",
+  "token_artifact_path": "outputs/amazon_csj_full_dataset_train/phase12_tokens/fused_semantic_ids.jsonl",
+  "require_token_artifact": false,
+  "dataset": {
+    "reviews_path": "data/full_dataset/Clothing_Shoes_and_Jewelry.jsonl",
+    "min_user_interactions": 5,
+    "min_item_interactions": 5,
+    "max_users": 12288,
+    "max_items": 24576,
+    "max_review_records": 50000000,
+    "review_record_offset": 0,
+    "user_rank_offset": 0,
+    "item_rank_offset": 0,
+    "collapse_consecutive_duplicates": false
+  },
+  "checkpointing": {
+    "mlm_save_steps": 0,
+    "autoregressive_save_steps": 25,
+    "keep_last": 3
+  },
+  "method_toggles": {
+    "use_behavior_alignment": false,
+    "use_text_modality": true,
+    "use_visual_modality": true,
+    "use_late_fusion": true,
+    "use_cross_modal_mlm": false,
+    "use_generative_finetuning": true,
+    "use_cold_start_evaluation": true
+  }
+}

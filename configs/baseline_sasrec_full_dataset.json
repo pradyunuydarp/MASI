@@ -1,0 +1,42 @@
+{
+  "seed": 7,
+  "runtime": {
+    "device": "auto",
+    "log_device_summary": true,
+    "run_name": "baseline_sasrec_full_dataset"
+  },
+  "dataset": {
+    "reviews_path": "data/full_dataset/Clothing_Shoes_and_Jewelry.jsonl",
+    "kaggle_input_slugs": [
+      "masi-amazon-csj-full-dataset"
+    ],
+    "reviews_relpath": "Clothing_Shoes_and_Jewelry.jsonl",
+    "min_user_interactions": 5,
+    "min_item_interactions": 5,
+    "max_users": 12288,
+    "max_items": 24576,
+    "max_review_records": 50000000,
+    "review_record_offset": 0,
+    "user_rank_offset": 0,
+    "item_rank_offset": 0,
+    "collapse_consecutive_duplicates": false
+  },
+  "baseline": {
+    "name": "sasrec",
+    "max_sequence_length": 50,
+    "hidden_dim": 128,
+    "num_heads": 4,
+    "num_layers": 3,
+    "dropout": 0.1,
+    "batch_size": 256,
+    "learning_rate": 0.001,
+    "epochs": 30,
+    "top_k": 10,
+    "max_eval_candidates": 1024,
+    "cold_start_ratio": 0.2,
+    "min_train_history": 1,
+    "use_cold_start_evaluation": true
+  },
+  "outputs_root": "outputs/baselines/sasrec_full_dataset",
+  "checkpoint_root": "outputs/baselines/sasrec_full_dataset/checkpoints"
+}
