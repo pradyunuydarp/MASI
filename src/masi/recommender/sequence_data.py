@@ -42,7 +42,7 @@ class CrossModalMLMExample:
     label_token_ids: list[int]
 
 
-def _pad_sequence(sequence: list[int], *, max_length: int, pad_id: int) -> list[int]:
+def _pad_sequence_left(sequence: list[int], *, max_length: int, pad_id: int) -> list[int]:
     """Pad or truncate a token sequence from the left.
 
     Left truncation mirrors common recommender practice: the most recent
@@ -52,6 +52,14 @@ def _pad_sequence(sequence: list[int], *, max_length: int, pad_id: int) -> list[
 
     if len(sequence) >= max_length:
         return sequence[-max_length:]
+    return [pad_id] * (max_length - len(sequence)) + sequence
+
+
+def _pad_sequence_right(sequence: list[int], *, max_length: int, pad_id: int) -> list[int]:
+    """Pad or truncate a token sequence from the right."""
+
+    if len(sequence) >= max_length:
+        return sequence[:max_length]
     return sequence + [pad_id] * (max_length - len(sequence))
 
 
@@ -158,12 +166,12 @@ class GenerativeSequenceDataset(Dataset[GenerativeTrainingExample]):
                         user_id=user_id,
                         history_item_ids=list(history_items),
                         target_item_id=target_item,
-                        input_token_ids=_pad_sequence(
+                        input_token_ids=_pad_sequence_left(
                             flattened_history,
                             max_length=history_max_tokens,
                             pad_id=vocabulary.pad_id,
                         ),
-                        label_token_ids=_pad_sequence(
+                        label_token_ids=_pad_sequence_right(
                             target_tokens,
                             max_length=target_max_tokens,
                             pad_id=vocabulary.pad_id,
@@ -255,12 +263,12 @@ class CrossModalMLMDataset(Dataset[CrossModalMLMExample]):
                 CrossModalMLMExample(
                     item_id=fused_id.item_id,
                     direction="text_to_visual",
-                    input_token_ids=_pad_sequence(
+                    input_token_ids=_pad_sequence_right(
                         [vocabulary.bos_id, *text_to_visual, vocabulary.eos_id],
                         max_length=max_length,
                         pad_id=vocabulary.pad_id,
                     ),
-                    label_token_ids=_pad_sequence(
+                    label_token_ids=_pad_sequence_right(
                         [-100, *text_to_visual_labels, -100],
                         max_length=max_length,
                         pad_id=-100,
@@ -271,12 +279,12 @@ class CrossModalMLMDataset(Dataset[CrossModalMLMExample]):
                 CrossModalMLMExample(
                     item_id=fused_id.item_id,
                     direction="visual_to_text",
-                    input_token_ids=_pad_sequence(
+                    input_token_ids=_pad_sequence_right(
                         [vocabulary.bos_id, *visual_to_text, vocabulary.eos_id],
                         max_length=max_length,
                         pad_id=vocabulary.pad_id,
                     ),
-                    label_token_ids=_pad_sequence(
+                    label_token_ids=_pad_sequence_right(
                         [-100, *visual_to_text_labels, -100],
                         max_length=max_length,
                         pad_id=-100,
